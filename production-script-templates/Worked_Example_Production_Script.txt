@@ -1,0 +1,202 @@
+WORKED EXAMPLE — a complete production script for the Storyroom editor
+A made-up case: 9 narration blocks, 12 beats. It shows a cold open of two sound bites
+(the rule is 2 or 3, never 4), narration shots of 4-6 seconds, b-roll from the sheet,
+a scene that continues across a cut, a bite mid-film, and three people whose photos
+appear when they are named. All times here are invented for the example; in a real
+script every Source in/out comes from the research kit (find, words, contact sheets).
+Use it with Footage_Sheet_Template.md (same file names). Copy its shape, replace its content.
+
+Check: narration 56 s + bites 8 + 10 + 7 s = 81 s = TOTAL MASTER RUNTIME.
+
+Narration blocks:
+
+| Block | Narration timeline | Wording |
+|---|---|---|
+| 1 | 00:00:00,000 → 00:00:05,200 | On the night of March 14th, Daniel Reyes finished his shift at Oak Ridge Mall. |
+| 2 | 00:00:05,200 → 00:00:11,000 | He was twenty-three, saving for a car, and he always called his mother when he left work. |
+| 3 | 00:00:11,000 → 00:00:18,000 | That night, the call never came. |
+| 4 | 00:00:18,000 → 00:00:24,000 | Security cameras in the parking garage show Daniel walking to level three at 10:42 p.m. |
+| 5 | 00:00:24,000 → 00:00:30,000 | It is the last time anyone can say for certain where he was. |
+| 6 | 00:00:30,000 → 00:00:36,500 | By morning, Daniel's mother Linda Reyes was at the Pine Street police station. |
+| 7 | 00:00:36,500 → 00:00:45,000 | Officers searched the garage, the mall, and the road along the river. |
+| 8 | 00:00:45,000 → 00:00:51,000 | Three days later, a new name surfaced in the case: Mark Cole. |
+| 9 | 00:00:51,000 → 00:00:56,000 | And the question became not where Daniel was, but who he was with. |
+
+PROJECT: The Disappearance of Daniel Reyes (worked example)
+SOURCES: S01.mp4, S02.mp4, S03.mp4, S04.mp4, B01.mp4
+FORMAT: Beat-by-Beat Documentary (Voice Over & Sync Sound Bites)
+TOTAL MASTER RUNTIME: 00:01:21,000
+
+Beat: 001
+Type: DOCUMENTARY SOUND BITE
+Master timeline: 00:00:00,000 --> 00:00:08,000 (Duration: 8 sec)
+Narration clock: PAUSED at 00:00:00,000
+Narration state: PAUSED (Suspended for duration of bite)
+Speaker: Linda Reyes (mother)
+Exact spoken dialogue: "He called me every night. Every single night. And then he didn't."
+Full source: S03.mp4
+Source in: 00:00:12,400
+Source out: 00:00:20,400
+Footage audio: UNMUTED (100% Dialogue Level, Clean)
+Cut action: HARD CUT TO SPEAKER
+Visual direction: Linda Reyes in close-up at her kitchen table, one unbroken take.
+On-screen caption: None
+Continuity note: Cold open, bite 1 of 2: emotion. No narration, no music, no caption.
+
+Beat: 002
+Type: DOCUMENTARY SOUND BITE
+Master timeline: 00:00:08,000 --> 00:00:18,000 (Duration: 10 sec)
+Narration clock: PAUSED at 00:00:00,000
+Narration state: PAUSED (Suspended for duration of bite)
+Speaker: Chief Ana Ruiz, Pine Street Police
+Exact spoken dialogue: "We treated this as a missing person from the first hour. We searched everywhere he could have walked."
+Full source: S02.mp4
+Source in: 00:01:10,200
+Source out: 00:01:20,200
+Footage audio: UNMUTED (100% Dialogue Level, Clean)
+Cut action: HARD CUT TO SPEAKER
+Visual direction: Chief Ruiz at the podium, press conference, one take.
+On-screen caption: None
+Continuity note: Cold open, bite 2 of 2: stakes. The narrator speaks after it.
+
+Beat: 003
+Type: VOICE OVER
+Master timeline: 00:00:18,000 --> 00:00:23,200
+Narration clock: 00:00:00,000 --> 00:00:05,200
+Narration state: PLAYING
+Spoken narration: "On the night of March 14th, Daniel Reyes finished his shift at Oak Ridge Mall."
+Full source: S01.mp4
+Source in: 00:00:05,300
+Source out: 00:00:10,500
+Footage audio: MUTED (0%)
+Cut action: CUT TO EXTERIOR
+Visual direction: Oak Ridge Mall exterior at night, the main entrance.
+On-screen caption: None
+
+Beat: 004
+Type: VOICE OVER
+Master timeline: 00:00:23,200 --> 00:00:29,000
+Narration clock: 00:00:05,200 --> 00:00:11,000
+Narration state: PLAYING
+Spoken narration: "He was twenty-three, saving for a car, and he always called his mother when he left work."
+Full source: S01.mp4
+Source in: 00:00:10,500
+Source out: 00:00:16,300
+Footage audio: MUTED (0%)
+Cut action: CONTINUOUS (same file, internal cut)
+Visual direction: The mall car park lights, a car pulling out.
+On-screen caption: None
+
+Beat: 005
+Type: VOICE OVER
+Master timeline: 00:00:29,000 --> 00:00:36,000
+Narration clock: 00:00:11,000 --> 00:00:18,000
+Narration state: PLAYING
+Spoken narration: "That night, the call never came."
+Full source: S03.mp4
+Source in: 00:01:35,100
+Source out: 00:01:42,100
+Footage audio: MUTED (0%)
+Cut action: CUT TO DETAIL
+Visual direction: Linda Reyes's phone on the kitchen table (her interview, cutaway).
+On-screen caption: None
+
+Beat: 006
+Type: VOICE OVER
+Master timeline: 00:00:36,000 --> 00:00:42,000
+Narration clock: 00:00:18,000 --> 00:00:24,000
+Narration state: PLAYING
+Spoken narration: "Security cameras in the parking garage show Daniel walking to level three at 10:42 p.m."
+Full source: B01.mp4
+Source in: 00:00:01,000
+Source out: 00:00:07,000
+Footage audio: MUTED (0%)
+Cut action: CUT TO B-ROLL
+Visual direction: Parking garage, level three, the stairwell door.
+On-screen caption: None
+
+Beat: 007
+Type: VOICE OVER
+Master timeline: 00:00:42,000 --> 00:00:48,000
+Narration clock: 00:00:24,000 --> 00:00:30,000
+Narration state: PLAYING
+Spoken narration: "It is the last time anyone can say for certain where he was."
+Full source: B01.mp4
+Source in: 00:00:07,000
+Source out: 00:00:13,000
+Footage audio: MUTED (0%)
+Cut action: CONTINUOUS (same file, internal cut)
+Visual direction: The empty ramp of level three.
+On-screen caption: None
+
+Beat: 008
+Type: DOCUMENTARY SOUND BITE
+Master timeline: 00:00:48,000 --> 00:00:55,000 (Duration: 7 sec)
+Narration clock: PAUSED at 00:00:30,000
+Narration state: PAUSED (Suspended for duration of bite)
+Speaker: Linda Reyes (mother)
+Exact spoken dialogue: "I gave them his picture. I said, he doesn't just disappear."
+Full source: S03.mp4
+Source in: 00:00:40,600
+Source out: 00:00:47,600
+Footage audio: UNMUTED (100% Dialogue Level, Clean)
+Cut action: HARD CUT TO SPEAKER
+Visual direction: Linda Reyes, same interview, a later answer.
+On-screen caption: Linda Reyes — Daniel's mother
+Continuity note: Bite mid-film: the narration pauses, then resumes.
+
+Beat: 009
+Type: VOICE OVER
+Master timeline: 00:00:55,000 --> 00:01:01,500
+Narration clock: RESUMES at 00:00:30,000 --> 00:00:36,500
+Narration state: RESUMING
+Spoken narration: "By morning, Daniel's mother Linda Reyes was at the Pine Street police station."
+Full source: S01.mp4
+Source in: 00:00:23,400
+Source out: 00:00:29,900
+Footage audio: MUTED (0%)
+Cut action: CUT TO EXTERIOR
+Visual direction: Police cars outside the Pine Street station.
+On-screen caption: None
+
+Beat: 010
+Type: VOICE OVER
+Master timeline: 00:01:01,500 --> 00:01:10,000
+Narration clock: 00:00:36,500 --> 00:00:45,000
+Narration state: PLAYING
+Spoken narration: "Officers searched the garage, the mall, and the road along the river."
+Full source: S01.mp4
+Source in: 00:00:29,900
+Source out: 00:00:38,400
+Footage audio: MUTED (0%)
+Cut action: CONTINUOUS (same file, internal cut)
+Visual direction: Officers walking the garage with flashlights, then the road along the river.
+On-screen caption: None
+
+Beat: 011
+Type: VOICE OVER
+Master timeline: 00:01:10,000 --> 00:01:16,000
+Narration clock: 00:00:45,000 --> 00:00:51,000
+Narration state: PLAYING
+Spoken narration: "Three days later, a new name surfaced in the case: Mark Cole."
+Full source: S04.mp4
+Source in: 00:00:30,100
+Source out: 00:00:36,100
+Footage audio: MUTED (0%)
+Cut action: CUT TO EXTERIOR
+Visual direction: Courthouse exterior, reporters on the steps.
+On-screen caption: None
+
+Beat: 012
+Type: VOICE OVER
+Master timeline: 00:01:16,000 --> 00:01:21,000
+Narration clock: 00:00:51,000 --> 00:00:56,000
+Narration state: PLAYING
+Spoken narration: "And the question became not where Daniel was, but who he was with."
+Full source: S04.mp4
+Source in: 00:00:36,100
+Source out: 00:00:41,100
+Footage audio: MUTED (0%)
+Cut action: CONTINUOUS (same file, internal cut)
+Visual direction: The courthouse doors, people going in.
+On-screen caption: None

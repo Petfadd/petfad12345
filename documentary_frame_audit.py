@@ -82,18 +82,26 @@ def audit(project, root, plan):
             # storyboards made before that record existed.
             placed = fitted.get(beat['label']) or beat
             saved_name = asset.get('original_name') or asset.get('name')
+            # `asset_id` on a bite is its dialogue source.  Picture source/range is
+            # audited through the Beat's picture scene above, so a separate WAV must
+            # not be compared with or decoded as the B-roll picture.
+            expected_name = placed.get('audio_file') or placed.get('source_file')
+            expected_in = placed.get('audio_in_ms', placed.get('source_in_ms'))
+            expected_out = placed.get('audio_out_ms', placed.get('source_out_ms'))
             differences = []
-            if saved_name != placed['source_file']:
-                differences.append(f"file is {placed['source_file']} in the script but {saved_name} in the storyboard")
+            if saved_name != expected_name:
+                differences.append(f"audio file is {expected_name} in the script but {saved_name} in the storyboard")
             if round(bite.get('pause_s', -1) * 1000) != placed['pause_ms']:
                 differences.append(f"pause is {placed['pause_ms']/1000:.3f}s in the script but "
                                    f"{round(bite.get('pause_s', -1)*1000)/1000:.3f}s in the storyboard")
-            if round(bite.get('source_in_s', -1) * 1000) != placed['source_in_ms']:
-                differences.append(f"source IN is {placed['source_in_ms']/1000:.3f}s in the script but "
+            if round(bite.get('source_in_s', -1) * 1000) != expected_in:
+                differences.append(f"WAV-local IN is {expected_in/1000:.3f}s in the script but "
                                    f"{round(bite.get('source_in_s', -1)*1000)/1000:.3f}s in the storyboard")
-            if round(bite.get('source_out_s', -1) * 1000) != placed['source_out_ms']:
-                differences.append(f"source OUT is {placed['source_out_ms']/1000:.3f}s in the script but "
-                                   f"{round(bite.get('source_out_s', -1)*1000)/1000:.3f}s in the storyboard")
+            # The saved plan uses the audible range, while `audio_out_ms` can include
+            # a longer muted handle.  It must never exceed that declared WAV window.
+            saved_out = round(bite.get('source_out_s', -1) * 1000)
+            if saved_out > expected_out or saved_out <= expected_in:
+                differences.append(f"WAV-local OUT is outside the declared {expected_in/1000:.3f}–{expected_out/1000:.3f}s range")
             if differences:
                 raise ValueError(f"Beat {beat['label']}: " + '; '.join(differences) +
                                  '. The saved bite and the range recorded when this storyboard was built '
@@ -101,7 +109,10 @@ def audit(project, root, plan):
             if bite.get('stale_reasons'):
                 raise ValueError(f"Beat {beat['label']} ({bite.get('asset_name') or 'sound bite'}): {bite['stale_reasons'][0]} "
                                  'Rebuild the Beat timeline to use the current files.')
-            add_part(result, required, root, asset, beat['source_in_ms'], beat['source_out_ms'], f"Beat {beat['label']}")
+            # Current Beat storyboards already carry the bite's independent picture
+            # as a scene, so there is no second picture part to invent from its audio.
+            # Older storyboards (without bite scenes) retain their legacy combined
+            # source behaviour through the normal scene audit above.
         for path, last in required.items():
             inspect_video(path, last)
         result['verified'] = True

@@ -308,9 +308,13 @@ def schedule_auto_build(pid,delay=4.0):
   t=threading.Timer(delay,_auto_build,args=(pid,));t.daemon=True;_AUTO_TIMERS[pid]=t;t.start()
 
 def _auto_fingerprint(p,root,beats):
- named={b['source_file'] for b in beats}
+ # Picture and separately named soundbite WAVs both affect a Beat build.  Keeping
+ # their signatures distinct prevents a WAV replacement from being mistaken for a
+ # harmless B-roll change (or vice versa).
+ named={name for b in beats for name in (b.get('source_file'),b.get('picture_file'),b.get('audio_file')) if name}
  parts=[hashlib.sha256(((p.get('production_script') or {}).get('text','')).encode()).hexdigest(),
-        hashlib.sha256(json.dumps((p.get('srt') or {}).get('blocks') or [],sort_keys=True).encode()).hexdigest()]
+        hashlib.sha256(json.dumps((p.get('srt') or {}).get('blocks') or [],sort_keys=True).encode()).hexdigest(),
+        hashlib.sha256(json.dumps(p.get('documentary_beat_overrides') or {},sort_keys=True).encode()).hexdigest()]
  voice=p.get('voiceover') or {}
  try:st=(root/voice.get('path','')).stat();parts.append(f"{voice.get('path')}|{st.st_size}|{st.st_mtime_ns}")
  except OSError:parts.append('no-voice')
@@ -341,7 +345,15 @@ def _auto_build(pid):
   if not script.strip() or not (p.get('srt') or {}).get('blocks') or not p.get('voiceover'):
    missing=[n for n,ok in (('production script',script.strip()),('SRT',(p.get('srt') or {}).get('blocks')),('narration',p.get('voiceover'))) if not ok]
    _auto_note(pid,'waiting','Waiting for: '+', '.join(missing)+'.');return
-  try:beats=read_beats(script)
+  try:
+   beats=read_beats(script)
+   from documentary_beats import apply_overrides,media_preflight
+   beats=apply_overrides(beats,p)
+   preflight=media_preflight(beats,p,root)
+   if preflight['blocking_issues']:
+    _auto_note(pid,'waiting',preflight['blocking_issues'][0]);return
+   if preflight['missing_pictures']:
+    _auto_note(pid,'waiting','Review and explicitly approve the MISSING PICTURE placeholders before building.');return
   except ValueError as e:_auto_note(pid,'error','The production script could not be read: '+str(e));return
   fp=_auto_fingerprint(p,root,beats)
   if p.get('scenes') and (p.get('documentary_beat_review') or {}).get('auto_fingerprint')==fp:return
@@ -530,9 +542,15 @@ def scene_review(p,i,s,a,ranges,last,final=False):
  Returns (errors, notes). `ranges` is the per-asset list of intervals already claimed
  by earlier scenes, so an overlap is caught the same way in both paths.
  """
- errors=[];notes=[];pre=f'Scene {i+1}: '
+ errors=[];notes=[];pre=f'Scene {i+1}: ';row=s.get('plan_row') or {}
  if s['frame_in']!=last or s['frame_out']<=last:errors.append(pre+'timeline has a gap, overlap or empty scene.')
  if not a:return errors+[pre+'assign uploaded media.'],notes
+ if row.get('picture_status')=='MISSING PICTURE' or a.get('storyroom_placeholder'):
+  detail='MISSING PICTURE placeholder'
+  if row.get('image_prompt'):detail+=' · image prompt retained for review'
+  if final:errors.append(pre+detail+' is not completed footage; replace the picture before final delivery.')
+  else:notes.append(pre+detail+'. Narration/sound timing is preserved and no footage was substituted.')
+  return errors,notes
  if not a['verified'] or not a['source'].strip():errors.append(pre+'confirm the asset’s identity/context and record its source.')
  person=s['person']
  # Earlier review drafts stored the whole Shows instruction as the person's name.
@@ -2444,6 +2462,26 @@ def perform_upload(pid,key=''):
    for old in (root/'inputs').glob('voiceover.*'):old.unlink()
    final=root/'inputs'/('voiceover'+ext);dest.replace(final);p['voiceover']={'name':f.filename,'path':final.relative_to(root).as_posix(),'duration':info['duration']}
    for scene in p['scenes']:scene['approved']=False
+  elif kind=='soundbite_audio':
+   # Documentary Beat scripts may name a separate interview/WAV source.  Keep it
+   # in the project media register (not as narration and not as picture footage),
+   # so a sound replacement can never silently replace the B-roll picture.
+   if ext not in ['.wav','.mp3','.m4a','.aac','.flac','.ogg','.opus']:raise BadRequest('Use WAV, MP3, M4A, AAC, FLAC, OGG or OPUS soundbite audio.')
+   name=Path(f.filename).name;matches=[a for a in p['assets'] if a.get('kind')=='audio' and not a.get('derived_from') and str(a.get('original_name') or a.get('name') or '').casefold()==name.casefold()]
+   if matches:removable(pid,{a['id'] for a in matches})
+   aid=matches[0]['id'] if matches else uid();dest=root/'audio'/(uid()+ext);dest.parent.mkdir(parents=True,exist_ok=True);update(pid,key,'saving')
+   try:
+    save_local(f,dest,pid,key);check(pid,key);update(pid,key,'checking_metadata');info=probe(dest);check(pid,key)
+    if not info['has_audio'] or not info['duration']:raise ValueError('No decodable audio')
+   except Exception as e:
+    dest.unlink(missing_ok=True)
+    if isinstance(e,BadRequest):raise
+    raise BadRequest('Soundbite audio check failed: '+str(e)[:350])
+   asset={'id':aid,'name':name,'original_name':name,'path':dest.relative_to(root).as_posix(),'kind':'audio','duration':info['duration'],'dimensions':None,'source':'','people':[],'category':'soundbite_audio','verified':False,'rights':'unreviewed','notes':'Separate soundbite audio; never a picture source.','revision':uid()}
+   if matches:
+    old_paths=[root/a['path'] for a in matches if a.get('path')]
+    p['assets']=[a for a in p['assets'] if a['id'] not in {m['id'] for m in matches}]+[asset]
+   else:p['assets'].append(asset)
   elif kind=='asset':
    if ext not in ['.mp4','.mov','.jpg','.jpeg','.png','.webp']:raise BadRequest('Use MP4/MOV video or JPG/PNG/WebP photographs.')
    photo=ext in ['.jpg','.jpeg','.png','.webp'];name=Path(f.filename).name
@@ -3535,6 +3573,56 @@ def documentary_music_file(pid):
   if not (p.get('documentary_music') or {}).get('name') or not music_path(root).is_file():raise NotFound('No background music is saved in this production.')
   return send_file(music_path(root),conditional=True,as_attachment=request.args.get('download')=='1')
 
+def _set_documentary_beat_source(pid, label, role, data):
+ """Save one independent Beat source override without editing the production script."""
+ if role not in ('picture','audio'):raise BadRequest('Unknown Beat source role.')
+ if not isinstance(data,dict):raise BadRequest('Provide a JSON source selection.')
+ filename=str(data.get('file') or '').strip()
+ if not filename or Path(filename).name!=filename:raise BadRequest('Choose an exact uploaded filename.')
+ p=load(pid);script=(p.get('production_script') or {}).get('text','')
+ from documentary_beats import read_beats
+ try:beats=read_beats(script)
+ except ValueError as e:raise BadRequest(str(e))
+ beat=next((b for b in beats if str(b.get('label'))==str(label)),None)
+ if not beat:raise NotFound('Beat not found in the current production script.')
+ asset=next((a for a in p.get('assets',[]) if (a.get('original_name') or a.get('name'))==filename),None)
+ if not asset:raise BadRequest('That uploaded file is not available in this production.')
+ allowed=('video','image') if role=='picture' else ('audio','video')
+ if asset.get('kind') not in allowed:raise BadRequest(('Picture' if role=='picture' else 'Soundbite audio')+' replacement has the wrong media type.')
+ def value(name,previous):
+  got=data.get(name,previous)
+  if isinstance(got,bool) or not isinstance(got,int):raise BadRequest(name+' must be an integer millisecond value.')
+  return got
+ if role=='picture':
+  if asset.get('kind')=='image':start,end=0,0
+  else:
+   start=value('in_ms',beat.get('picture_in_ms') or 0)
+   default_end=beat.get('picture_out_ms') or (start+int(beat.get('duration_ms') or beat.get('master_duration_ms') or 0))
+   end=value('out_ms',default_end)
+   if start<0 or end<=start or end>round(float(asset.get('duration') or 0)*1000):raise BadRequest('Picture replacement IN/OUT must be inside the selected video. Choose a source range at least as long as this Beat.')
+  entry={'file':filename,'in_ms':start,'out_ms':end,'status':str(data.get('status') or ('UPLOADED PHOTO' if asset.get('kind')=='image' else 'PROVISIONAL VIDEO')).upper()}
+ else:
+  start=value('in_ms',beat.get('audio_in_ms') or 0);end=value('out_ms',beat.get('audio_out_ms') or 0)
+  if start<0 or end<=start or end>round(float(asset.get('duration') or 0)*1000):raise BadRequest('Soundbite WAV-local IN/OUT must be inside the selected audio file.')
+  entry={'file':filename,'in_ms':start,'out_ms':end}
+ overrides=p.setdefault('documentary_beat_overrides',{});record=overrides.setdefault(str(beat['label']),{});record[role]=entry
+ # Existing picture and audio source keys are intentionally untouched. A rebuild is
+ # required to put the independent replacement on the review timeline.
+ save(p)
+ return public(load(pid))
+
+@app.post('/api/projects/<pid>/documentary-beats/<label>/picture-source')
+def replace_documentary_beat_picture(pid,label):
+ with LOCKS[pid]:
+  editable(pid)
+  return jsonify(_set_documentary_beat_source(pid,label,'picture',request.get_json(silent=True) or {}))
+
+@app.post('/api/projects/<pid>/documentary-beats/<label>/audio-source')
+def replace_documentary_beat_audio(pid,label):
+ with LOCKS[pid]:
+  editable(pid)
+  return jsonify(_set_documentary_beat_source(pid,label,'audio',request.get_json(silent=True) or {}))
+
 @app.get('/api/projects/<pid>/documentary-beat-proposal')
 def documentary_beat_proposal(pid):
  """Show how each scripted Beat would be fitted, before anything is built."""
@@ -3548,6 +3636,14 @@ def documentary_beat_proposal(pid):
    beats=read_beats(script)
    from documentary_beat_plan import frame_limits
    data=proposal(p,beats,request.args.get('scripted_review_beat'),request.args.get('scripted_review_source'),frame_limits(folder(pid),p['assets']))
+   from documentary_beats import apply_overrides,media_preflight
+   effective=apply_overrides(beats,p);media_report=media_preflight(effective,p,folder(pid))
+   # A declared MISSING PICTURE is a permitted review placeholder. Missing WAVs,
+   # B-roll files, ambiguous files and bad local ranges remain hard build blockers.
+   data['media_validation']=media_report
+   data['missing_pictures']=media_report['missing_pictures']
+   data['provisional_sources']=media_report['unresolved_sources']
+   data['issues']=list(dict.fromkeys(list(data.get('issues') or [])+media_report['blocking_issues']))
   except ValueError as e:raise BadRequest(str(e))
   # The client used to send plan_revision:0 for every project. Once a plan holds
   # bites its revision is never 0, so every rebuild was refused as "the plan
@@ -3561,7 +3657,7 @@ def documentary_beat_proposal(pid):
   return jsonify({'project_version':p.get('updated'),'script_sha256':hashlib.sha256(script.encode()).hexdigest(),
                   'plan_revision':current['revision'],'replaces_beat_timeline':bool(current['bites']),
                   'beat_timeline_stale':changed,
-                  'assets':[{'name':a.get('original_name') or a.get('name'),'duration':a.get('duration')} for a in p.get('assets',[])],
+                  'assets':[{'name':a.get('original_name') or a.get('name'),'duration':a.get('duration'),'kind':a.get('kind')} for a in p.get('assets',[])],
                   **data})
 
 def _reapply_transition_choice(p):
@@ -3645,6 +3741,14 @@ def _documentary_beat_build_work(pid, root, data, report):
  from documentary_beat_plan import fit,frame_limits
  report('read',0.5)
  beats=read_beats(script)
+ from documentary_beats import apply_overrides,media_preflight
+ beats=apply_overrides(beats,p)
+ media_report=media_preflight(beats,p,root)
+ if media_report['blocking_issues']:raise ValueError(' '.join(media_report['blocking_issues']))
+ expected_placeholders={str(x['beat']) for x in media_report['missing_pictures']}
+ approved_placeholders=data.get('approved_missing_pictures') or []
+ if expected_placeholders and (not isinstance(approved_placeholders,list) or {str(x) for x in approved_placeholders}!=expected_placeholders):
+  raise ValueError('Review and explicitly approve every MISSING PICTURE placeholder before building. These slots remain review-only and are not completed footage.')
  report('read',1.0)
  # Fitting is mechanical and every change is saved with the storyboard, so the
  # review timeline states exactly which ranges differ from the script.
@@ -3674,9 +3778,10 @@ def _documentary_beat_build_work(pid, root, data, report):
  _carry_cinematic(previous.get('scenes') or [],staged.get('scenes') or [])
  report('prepare',1.0)
  assets={(a.get('original_name') or a.get('name')):a for a in p['assets']}
- # The frame check decodes each source from its first frame, so it is reported per
- # source and, inside a source, per frame. This is most of the build's duration.
- names=sorted({b['source_file'] for b in beats})
+ # The frame check applies only to actual video picture sources.  A declared
+ # MISSING PICTURE gets its labelled review placeholder, not a made-up video decode;
+ # WAV sound sources are validated independently by the audio path.
+ names=sorted({b.get('source_file') for b in beats if b.get('source_file') and assets.get(b.get('source_file'),{}).get('kind')=='video'})
  for index,name in enumerate(names):
   asset=assets[name];path=root/asset['path'];rate=source_rate(path)
   end=max(b['source_out_ms'] for b in beats if b['source_file']==name)
@@ -3818,8 +3923,9 @@ def transcribe_documentary_bite(pid,bid):
   asset=next((a for a in p.get('assets',[]) if a.get('id')==bite.get('asset_id')),None)
   reasons=annotate_plan(p,root,{'bites':[dict(bite)]})['bites'][0].get('stale_reasons') or []
   if reasons:raise BadRequest(' '.join(reasons))
-  source=(root/asset.get('path','')).resolve()
-  if not asset or not source.is_relative_to((root/'sources').resolve()) or not source.is_file():raise BadRequest('The sound-bite source video is missing.')
+  if not asset:raise BadRequest('The sound-bite audio source is missing.')
+  source=(root/asset.get('path','')).resolve();allowed=(root/'audio').resolve() if asset.get('kind')=='audio' else (root/'sources').resolve()
+  if asset.get('kind') not in ('audio','video') or not source.is_relative_to(allowed) or not source.is_file():raise BadRequest('The sound-bite audio source is missing.')
  try:
   segments,meta=bite_speech.transcribe(source,bite['source_in_s'],bite['source_out_s'])
   entry=save(root,plan,bite,asset,segments,meta)

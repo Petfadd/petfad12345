@@ -10,3 +10,6 @@ __pycache__/
 
 # Machine-local settings (cache location, proxy quality)
 settings.json
+
+# Runtime performance telemetry
+perf_logs/

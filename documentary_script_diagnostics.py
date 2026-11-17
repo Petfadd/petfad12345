@@ -32,12 +32,20 @@ def diagnose(project,root):
     assets=project.get('assets',[]); intervals=[]; narration=[]
     for i,h in enumerate(heads):
         body=text[h.end():heads[i+1].start() if i+1<len(heads) else len(text)]
-        # Scripts name the file under Video File or Full Source; the beat reader
-        # accepts both, so this check has to as well or it reports a false miss.
-        name=re.search(r'^(?:Video File|Full Source):\s*(\S.*?)\s*$',body,re.M|re.I)
+        # Picture and external dialogue may be named separately.  A literal MISSING
+        # picture is an intentional review slot, not an absent filename to silently
+        # substitute or a parser failure.
+        name=re.search(r'^(?:Picture File|Picture Source|Video File|Full Source):\s*(\S.*?)\s*$',body,re.M|re.I)
         if name:
-            filename=name.group(1).strip();matches=[a for a in assets if (a.get('original_name') or a.get('name'))==filename and (Path(root)/a.get('path','')).is_file()]
-            if len(matches)!=1 and filename not in intervals:intervals.append(filename)
+            filename=name.group(1).strip()
+            if not re.search(r'\bMISSING\b',filename,re.I):
+                matches=[a for a in assets if (a.get('original_name') or a.get('name'))==filename and (Path(root)/a.get('path','')).is_file()]
+                if len(matches)!=1 and filename not in intervals:intervals.append(filename)
+        audio=re.search(r'^(?:Soundbite Audio File|Sound Bite Audio File|Sound Source File|Sound Source|WAV Audio File|WAV File|Audio File|Soundbite WAV):\s*(\S.*?)\s*$',body,re.M|re.I)
+        if audio:
+            filename=audio.group(1).strip();matches=[a for a in assets if (a.get('original_name') or a.get('name'))==filename and (Path(root)/a.get('path','')).is_file()]
+            marker='soundbite audio '+filename
+            if len(matches)!=1 and marker not in intervals:intervals.append(marker)
         # Match the whole stated line before splitting on the arrow. Searching for
         # a clock pair anywhere in the line made "PAUSED at 00:00:32,000" read as
         # the start of a narration span, which corrupted the beat before it.

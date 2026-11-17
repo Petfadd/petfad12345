@@ -17,7 +17,7 @@ def picture_plan(project, plan, allow_tail=False):
     for s in scenes:
         if s['frame_in']!=cursor or s['frame_out']<=cursor:raise ValueError('The base picture timeline has a gap or overlap; review it first.')
         a=assets.get(s.get('asset_id'))
-        if not a or a.get('kind')!='video':raise ValueError('This review preview requires an assigned video in every base slot; no picture was substituted.')
+        if not a or a.get('kind') not in ('video','image'):raise ValueError('This review preview requires an assigned picture in every base slot; no picture was substituted.')
         cursor=s['frame_out']
     narration=timeline['narration_duration_s'];tail=cursor/30-narration
     if tail < -.001:raise ValueError('The base picture ends before the narration. Fix the mismatch before previewing.')
@@ -26,10 +26,10 @@ def picture_plan(project, plan, allow_tail=False):
     # silently round a user's selected pause or alter the audio duration.
     bites=[]
     for b in sorted(plan['bites'],key=lambda b:(b['pause_s'],b['created'])):
-        pause=round(b['pause_s']*30);frames=round((b['source_out_s']-b['source_in_s'])*30)
-        if abs(pause/30-b['pause_s'])>.001 or abs(frames/30-(b['source_out_s']-b['source_in_s']))>.001 or frames<1:
-            raise ValueError('The sound-bite pause and duration must align to 30 fps output frames. Choose frame-aligned times; no timing was changed.')
-        if b['asset_id'] not in assets:raise ValueError('Sound-bite source is missing.')
+        pause=round(b['pause_s']*30);picture_duration=float(b.get('picture_duration_s',b['source_out_s']-b['source_in_s']));frames=round(picture_duration*30)
+        if abs(pause/30-b['pause_s'])>.001 or abs(frames/30-picture_duration)>.001 or frames<1:
+            raise ValueError('The sound-bite pause and picture duration must align to 30 fps output frames. Choose frame-aligned times; no timing was changed.')
+        if b.get('picture_asset_id',b['asset_id']) not in assets:raise ValueError('Sound-bite picture source is missing.')
         bites.append((pause,frames,b))
     parts=[];pos=0
     def base_until(end):
@@ -44,11 +44,11 @@ def picture_plan(project, plan, allow_tail=False):
                           'camera':_camera(scene),'camera_first':pos-scene['frame_in'],'camera_total':scene['frame_out']-scene['frame_in']})
             pos=last
     for pause,frames,b in bites:
-        base_until(pause);parts.append({'asset_id':b['asset_id'],'start':b['source_in_s'],'frames':frames,'kind':'sound_bite'})
+        base_until(pause);parts.append({'asset_id':b.get('picture_asset_id',b['asset_id']),'start':b.get('picture_source_in_s',b['source_in_s']),'frames':frames,'kind':'sound_bite'})
     base_until(cursor)
     for part in parts:
         a=assets[part['asset_id']]
-        if part['start']<0 or part['start']+part['frames']/30>float(a.get('duration') or 0)+.001:raise ValueError('A source interval exceeds its uploaded video; no extension or substitute was used.')
+        if a.get('kind')=='video' and (part['start']<0 or part['start']+part['frames']/30>float(a.get('duration') or 0)+.001):raise ValueError('A source interval exceeds its uploaded video; no extension or substitute was used.')
     return parts,tail,timeline
 
 
@@ -67,7 +67,8 @@ def build(root,project,plan,dest,allow_tail=False,progress=lambda *x:None,width=
         music=music_settings(project);audio_result=build_audio(root,project,plan,audio,music=bool(music['enabled'] and music['present'] and music_path(root).is_file()))
         def encode_part(i,part):
             a=assets[part['asset_id']];src=(root/a.get('path','')).resolve()
-            if not src.is_relative_to(root/'sources') or not src.is_file():raise ValueError('A required video source is missing.')
+            media_root=(root/'sources').resolve() if a.get('kind')=='video' else (root/'assets').resolve()
+            if not src.is_relative_to(media_root) or not src.is_file():raise ValueError('A required picture source is missing.')
             clip=work/f'{i:04d}.mp4';scale=part.get('scale',100)
             if not 100<=scale<=200:raise ValueError('The picture scale must be between 100 and 200 percent.')
             # Same framing rule as the final renderer: a narrow frame is filled and
@@ -84,7 +85,8 @@ def build(root,project,plan,dest,allow_tail=False,progress=lambda *x:None,width=
                 filt+=','+ffmpeg_filter(part['camera'],width,height,part['camera_first'],part['camera_total'])+',setsar=1'
             elif scale!=100:filt+=f',scale={round(width*scale/100/2)*2}:{round(height*scale/100/2)*2},crop={width}:{height},setsar=1'
             filt+=',format=yuv420p'
-            _run([ff,'-hide_banner','-loglevel','error','-y','-ss',f'{part["start"]:.6f}','-i',str(src),'-an','-vf',filt,'-frames:v',str(part['frames']),'-c:v','libx264','-preset','ultrafast','-crf','23','-threads','2',str(clip)])
+            source_args=(['-loop','1','-framerate','30','-i',str(src)] if a.get('kind')=='image' else ['-ss',f'{part["start"]:.6f}','-i',str(src)])
+            _run([ff,'-hide_banner','-loglevel','error','-y',*source_args,'-an','-vf',filt,'-frames:v',str(part['frames']),'-c:v','libx264','-preset','ultrafast','-crf','23','-threads','2',str(clip)])
             with av.open(str(clip)) as media:
                 if not media.streams.video or media.streams.video[0].frames!=part['frames']:raise ValueError('A source did not decode enough frames; preview stopped rather than freezing or looping.')
             return clip

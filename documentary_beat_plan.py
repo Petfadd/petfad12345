@@ -52,7 +52,8 @@ def unused_ranges(beats, filename, limit):
 
     A suggestion only: what those seconds show still has to be watched.
     """
-    used = sorted((b['source_in_ms'], b['source_out_ms']) for b in beats if b['source_file'] == filename)
+    used = sorted((b['source_in_ms'], b['source_out_ms']) for b in beats
+                  if b.get('source_file') == filename and b.get('source_in_ms') is not None and b.get('source_out_ms') is not None)
     free, cursor = [], 0
     for start, end in used:
         if start > cursor:
@@ -86,6 +87,15 @@ def fit(beats, assets, focus_beat=None, focus_source=None, frame_limit=None):
     adjusted, adjustments, issues = [], [], []
     for beat in beats:
         beat = dict(beat)
+        # A deliberately missing picture is a review placeholder, not a request to
+        # silently borrow a different clip. Its narration/sound timing survives the
+        # plan unchanged and the storyboard can later replace picture only.
+        if beat.get('picture_status') == 'MISSING PICTURE' or not beat.get('source_file'):
+            adjusted.append(beat)
+            continue
+        if beat.get('picture_status') in ('UPLOADED PHOTO', 'ILLUSTRATIVE VISUAL REQUIRED') or str(beat.get('source_file','')).lower().endswith(('.jpg','.jpeg','.png','.webp')):
+            adjusted.append(beat)
+            continue
         if beat['kind'] != 'narration':
             # Sound bites are picture too. Leaving a bite pointing past the end of
             # its file let the review storyboard fail later with a bare "source OUT
@@ -217,7 +227,9 @@ def overlaps(beats):
     pairs = []
     for i, b in enumerate(beats):
         for a in beats[:i]:
-            if a['source_file'] == b['source_file'] and b['source_in_ms'] < a['source_out_ms'] and b['source_out_ms'] > a['source_in_ms']:
+            if (a.get('source_file') and a.get('source_file') == b.get('source_file')
+                    and None not in (a.get('source_in_ms'), a.get('source_out_ms'), b.get('source_in_ms'), b.get('source_out_ms'))
+                    and b['source_in_ms'] < a['source_out_ms'] and b['source_out_ms'] > a['source_in_ms']):
                 pairs.append([a['number'], b['number']])
     return pairs
 
@@ -225,8 +237,29 @@ def overlaps(beats):
 def exact_duplicates(beats):
     """Interval pairs that are the same frames, not merely overlapping ones."""
     return [[a['number'], b['number']] for i, b in enumerate(beats) for a in beats[:i]
-            if a['source_file'] == b['source_file']
+            if a.get('source_file') and a.get('source_file') == b.get('source_file')
+            and None not in (a.get('source_in_ms'), a.get('source_out_ms'), b.get('source_in_ms'), b.get('source_out_ms'))
             and (a['source_in_ms'], a['source_out_ms']) == (b['source_in_ms'], b['source_out_ms'])]
+
+
+def exact_duplicate_groups(beats):
+    """Group identical picture ranges without expanding them into every pair.
+
+    A 233-Beat script can contain tens of thousands of identical-range pairs. A
+    proposal has to name the defect, but serialising a copy of the same warning for
+    every pair makes the review endpoint unusable. The full Beat list remains in
+    the response; this compact group is the scalable review description.
+    """
+    grouped = {}
+    for beat in beats:
+        filename, start, end = beat.get('source_file'), beat.get('source_in_ms'), beat.get('source_out_ms')
+        if not filename or start is None or end is None:
+            continue
+        grouped.setdefault((filename, start, end), []).append(beat)
+    return [{'source_file': key[0], 'source_in_ms': key[1], 'source_out_ms': key[2],
+             'beats': [beat['number'] for beat in rows], 'labels': [beat['label'] for beat in rows],
+             'pair_count': len(rows) * (len(rows) - 1) // 2}
+            for key, rows in grouped.items() if len(rows) > 1]
 
 
 def consecutive_bites(beats):
@@ -256,7 +289,7 @@ def narration_gaps(project, beats, frame_limit=None):
         holes.append((cursor, voice_ms))
     names = []
     for b in beats:
-        if b['source_file'] not in names:
+        if b.get('source_file') and b['source_file'] not in names:
             names.append(b['source_file'])
     files = {a.get('original_name') or a.get('name'): a
              for a in (project.get('assets') or []) if isinstance(a, dict)}
@@ -316,23 +349,55 @@ def proposal(project, beats, focus_beat=None, focus_source=None, frame_limit=Non
 
     ``frame_limit`` maps asset id to the highest decodable exclusive OUT in ms.
     """
+    from documentary_beats import apply_overrides
+    beats = apply_overrides(beats, project)
     adjusted, adjustments, issues = fit(beats, project.get('assets') or [], focus_beat, focus_source, frame_limit)
     # A short file used to "fit" by replaying the same closing seconds in several
-    # beats. That is silent repetition of the picture, not a range choice.
-    files = {b['number']: b for b in adjusted}
-    for first, second in exact_duplicates(adjusted):
-        a, b = files[first], files[second]
-        label_a, label_b = a['label'], b['label']
-        issues.append(f'Beats {label_a} and {label_b} would show exactly the same frames of {a["source_file"]} '
-                      f'({a["source_in_ms"]/1000:.3f}–{a["source_out_ms"]/1000:.3f}s). '
-                      f'That repeats the same picture instead of covering the second Beat. '
-                      f'Add an earlier, unused source IN for one of them, or upload a longer source or one more video.')
+    # beats. That is silent repetition of the picture, not a range choice. Report
+    # each identical range once: a long script can otherwise expand one authored
+    # error into tens of thousands of pairwise warnings and an unresponsive review.
+    duplicate_groups = exact_duplicate_groups(adjusted)
+    duplicate_key_by_beat = {
+        number: (group['source_file'], group['source_in_ms'], group['source_out_ms'])
+        for group in duplicate_groups for number in group['beats']
+    }
+    for group in duplicate_groups:
+        labels = group['labels']
+        shown = ', '.join(labels[:8]) + (f' and {len(labels)-8} more' if len(labels) > 8 else '')
+        issues.append(f'Beats {shown} would show exactly the same frames of {group["source_file"]} '
+                      f'({group["source_in_ms"]/1000:.3f}–{group["source_out_ms"]/1000:.3f}s; '
+                      f'{group["pair_count"]} repeated pair(s)). That repeats the same picture instead of '
+                      f'covering the later Beat(s). Give each Beat an earlier unused source range, a longer '
+                      f'source, or another uploaded video; nothing was repeated automatically.')
     gaps, gap_issues = narration_gaps(project, adjusted, frame_limit)
     issues.extend(gap_issues)
-    pairs = [p for p in overlaps(adjusted) if p not in exact_duplicates(adjusted)]
+    all_overlaps = overlaps(adjusted)
+    # Exact duplicates already block this proposal above. For ordinary overlaps, a
+    # bounded list is all that can be explicitly reviewed in this dialog. Do not
+    # silently turn an omitted pair into an approval: a truncation is its own blocker.
+    pairs = [pair for pair in all_overlaps
+             if not (duplicate_key_by_beat.get(pair[0]) is not None
+                     and duplicate_key_by_beat.get(pair[0]) == duplicate_key_by_beat.get(pair[1]))]
+    pair_limit = 500
+    repeated_ranges_total = len(pairs)
+    repeated_ranges_truncated = repeated_ranges_total > pair_limit
+    if repeated_ranges_truncated:
+        issues.append(f'The script has {repeated_ranges_total} non-identical overlapping picture ranges. '
+                      f'Only the first {pair_limit} can be shown in this review; resolve the overlaps or narrow '
+                      f'the review before any can be approved. Nothing was approved in bulk.')
+    pairs = pairs[:pair_limit]
     runs = consecutive_bites(adjusted)
-    total_ms = sum(b['source_out_ms']-b['source_in_ms'] for b in adjusted)
+    total_ms = sum(int(b.get('master_duration_ms') or b.get('duration_ms') or
+                       ((b.get('source_out_ms') or 0) - (b.get('source_in_ms') or 0))) for b in adjusted)
+    missing = [b for b in adjusted if b.get('picture_status') == 'MISSING PICTURE']
+    provisional = [b for b in adjusted if b.get('picture_status') in ('PROVISIONAL VIDEO', 'ILLUSTRATIVE VISUAL REQUIRED')]
     return {'beats': adjusted, 'adjustments': adjustments, 'issues': issues, 'narration_gaps': gaps,
-            'repeated_ranges': pairs, 'consecutive_bites': runs,
+            'repeated_ranges': pairs, 'repeated_ranges_total': repeated_ranges_total,
+            'repeated_ranges_truncated': repeated_ranges_truncated, 'exact_duplicate_groups': duplicate_groups,
+            'consecutive_bites': runs,
             'planned_ms': total_ms, 'narration_ms': round(float((project.get('voiceover') or {}).get('duration') or 0)*1000),
-            'source_files': sorted({b['source_file'] for b in adjusted})}
+            'source_files': sorted({b['source_file'] for b in adjusted if b.get('source_file')}),
+            'missing_pictures': [{'beat': b['label'], 'prompt': b.get('image_prompt',''),
+                                  'status': b.get('picture_status')} for b in missing],
+            'provisional_sources': [{'beat': b['label'], 'picture_file': b.get('picture_file',''),
+                                    'status': b.get('picture_status')} for b in provisional]}
