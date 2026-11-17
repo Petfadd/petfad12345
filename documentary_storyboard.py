@@ -5,12 +5,40 @@ is not a final renderer. Existing scripts, original SRT and media are not change
 """
 import copy, hashlib, math, uuid
 from pathlib import Path
+from PIL import Image, ImageDraw
 from strict_cuts import source_rate
 from documentary import validate_bite, build_timeline
 from documentary_beats import read_beats
 
 # One output frame at 30 fps, the rounding unit for every picture slot.
 FRAME_MS = 34
+
+
+def _missing_picture_asset(project, root, beat):
+    """Create an explicitly labelled review placeholder, never invented footage."""
+    token = 'missing-picture-' + str(beat['label']).zfill(4)
+    existing = next((a for a in project.get('assets', []) if a.get('id') == token), None)
+    if existing:
+        return existing
+    directory = Path(root) / 'assets' / '.storyroom-placeholders'; directory.mkdir(parents=True, exist_ok=True)
+    path = directory / (token + '.png')
+    if not path.is_file():
+        image = Image.new('RGB', (1280, 720), '#251d25'); draw = ImageDraw.Draw(image)
+        draw.rectangle((28, 28, 1252, 692), outline='#f4bb54', width=5)
+        draw.text((70, 190), 'MISSING PICTURE', fill='#f4bb54')
+        draw.text((70, 280), 'Review placeholder — not footage', fill='#ffffff')
+        prompt = str(beat.get('image_prompt') or '').strip()
+        if prompt:
+            draw.multiline_text((70, 370), 'Image prompt:\n' + prompt[:500], fill='#d7cbd7', spacing=8)
+        image.save(path, 'PNG')
+    asset = {'id': token, 'name': path.name, 'original_name': path.name,
+             'path': path.relative_to(root).as_posix(), 'kind': 'image', 'duration': 0,
+             'dimensions': [1280, 720], 'source': 'System review placeholder — no footage supplied.',
+             'people': [], 'category': 'missing_picture_placeholder', 'verified': False,
+             'rights': 'not_footage', 'notes': 'MISSING PICTURE — not completed footage.',
+             'revision': token, 'storyroom_placeholder': True}
+    project.setdefault('assets', []).append(asset)
+    return asset
 
 
 def prepare(project, root, approved_gaps, approved_overlaps, allow_tail, has_audio, beats=None, allow_consecutive_bites=False, fitted_ranges=None):
@@ -20,20 +48,35 @@ def prepare(project, root, approved_gaps, approved_overlaps, allow_tail, has_aud
     if project.get('scenes'):raise ValueError('An existing storyboard must not be replaced automatically.')
     # Work on a copy: the narration clock below is recorded on the staged project only.
     project=copy.deepcopy(project);project['voiceover'].pop('clock_s',None)
-    assets=project.get('assets') or [];files={}
+    assets=project.get('assets') or [];files={};audio_files={}
     for b in beats:
-        matches=[a for a in assets if (a.get('original_name') or a.get('name'))==b['source_file']]
-        if len(matches)!=1:raise ValueError(f"Beat {b['label']}: source {b['source_file']} is missing or ambiguous.")
-        a=matches[0];path=(root/a.get('path','')).resolve()
-        if a.get('kind')!='video' or not path.is_relative_to(root/'sources') or not path.is_file():raise ValueError(f"Beat {b['label']}: uploaded video is missing.")
-        duration_ms=float(a.get('duration') or 0)*1000
-        if b['source_out_ms']>duration_ms+.001:
-            # Name the numbers and the fix; "source OUT exceeds video duration"
-            # alone left no clue which range to change.
-            raise ValueError(f"Beat {b['label']}: source OUT {b['source_out_ms']/1000:.3f}s is past the end of {b['source_file']} "
-                             f"({duration_ms/1000:.3f}s). Review the Beat picture plan so the range is fitted before building, "
-                             f"or set Source OUT to {duration_ms/1000:.3f}s or less in the script.")
-        files[b['source_file']]=a
+        # Picture and dialogue are looked up independently.  In particular, an
+        # external WAV may not fall back to the B-roll video's original audio.
+        if b.get('picture_status') == 'MISSING PICTURE' or not b.get('source_file'):
+            placeholder = _missing_picture_asset(project, root, b)
+            assets=project['assets'];files['@missing:'+str(b['label'])] = placeholder
+            b['_picture_key']='@missing:'+str(b['label'])
+        else:
+            matches=[a for a in assets if (a.get('original_name') or a.get('name'))==b['source_file']]
+            if len(matches)!=1:raise ValueError(f"Beat {b['label']}: picture source {b['source_file']} is missing or ambiguous.")
+            a=matches[0];path=(root/a.get('path','')).resolve()
+            allowed_root=(root/'sources').resolve() if a.get('kind')=='video' else (root/'assets').resolve()
+            if a.get('kind') not in ('video','image') or not path.is_relative_to(allowed_root) or not path.is_file():raise ValueError(f"Beat {b['label']}: uploaded picture source is missing.")
+            if a.get('kind')=='video' and b.get('source_out_ms') is not None:
+                duration_ms=float(a.get('duration') or 0)*1000
+                if b['source_out_ms']>duration_ms+.001:
+                    raise ValueError(f"Beat {b['label']}: picture source OUT {b['source_out_ms']/1000:.3f}s is past the end of {b['source_file']} "
+                                     f"({duration_ms/1000:.3f}s). Review the Beat picture plan so the range is fitted before building.")
+            files[b['source_file']]=a;b['_picture_key']=b['source_file']
+        if b['kind']=='sound_bite':
+            audio_name=b.get('audio_file') or b.get('source_file')
+            matches=[a for a in assets if (a.get('original_name') or a.get('name'))==audio_name]
+            if len(matches)!=1:raise ValueError(f"Beat {b['label']}: soundbite audio {audio_name} is missing or ambiguous; it was not replaced with picture-source audio.")
+            audio=matches[0];audio_path=(root/audio.get('path','')).resolve()
+            if audio.get('kind') not in ('video','audio') or not audio_path.is_file():raise ValueError(f"Beat {b['label']}: uploaded soundbite audio is missing.")
+            if b.get('audio_out_ms') is None or b['audio_out_ms']>float(audio.get('duration') or 0)*1000+.001:
+                raise ValueError(f"Beat {b['label']}: WAV-local OUT is outside {audio_name}.")
+            audio_files[audio_name]=audio
     # A script does not have to open or close on narration. The timeline is driven by
     # each beat's own pause point, so a leading bite simply starts at 0.0 and a
     # trailing one plays over the last of the audio; build_timeline handles both.
@@ -52,7 +95,9 @@ def prepare(project, root, approved_gaps, approved_overlaps, allow_tail, has_aud
     found=set()
     for i,b in enumerate(beats):
         for a in beats[:i]:
-            if a['source_file']==b['source_file'] and b['source_in_ms']<a['source_out_ms'] and b['source_out_ms']>a['source_in_ms']:
+            if (a.get('source_file') and a.get('source_file')==b.get('source_file')
+                    and None not in (a.get('source_in_ms'),a.get('source_out_ms'),b.get('source_in_ms'),b.get('source_out_ms'))
+                    and b['source_in_ms']<a['source_out_ms'] and b['source_out_ms']>a['source_in_ms']):
                 pair=tuple(sorted((a['number'],b['number'])));found.add(pair)
                 if pair not in pairs:raise ValueError(f"Beats {a['label']} and {b['label']} overlap without explicit approval.")
     if found!=pairs:raise ValueError('Approved overlap list does not match the current script.')
@@ -128,7 +173,30 @@ def prepare(project, root, approved_gaps, approved_overlaps, allow_tail, has_aud
         if at_end and b['pause_ms']==script_end_ms<voice_ms and voice_ms-script_end_ms<=END_SLACK_S*1000:
             b=dict(b,pause_ms=voice_ms)
         if at_end and b['pause_ms']!=voice_ms:raise ValueError(f"Beat {b['label']}: a closing sound bite must start at the end of the narration ({voice_ms/1000:.3f}s).")
-        bite=validate_bite(project,root,{'asset_id':files[b['source_file']]['id'],'pause_s':b['pause_ms']/1000,'source_in_s':b['source_in_ms']/1000,'source_out_s':b['source_out_ms']/1000},has_audio)
+        picture_key=b.get('_picture_key') or b.get('source_file')
+        picture=files.get(picture_key)
+        audio=audio_files.get(b.get('audio_file'))
+        if not picture or not audio:raise ValueError(f"Beat {b['label']}: independent picture or soundbite source is missing.")
+        # Keep legacy plan keys (`asset_id`, `source_in_s`) for all existing tools:
+        # they now mean AUDIO for a bite. Picture gets its own keys and is never
+        # inferred from the audio asset.
+        voice=project.get('voiceover') or {};voice_path=Path(root)/voice.get('path','')
+        stat=voice_path.stat() if voice_path.is_file() else None
+        bite={'id':uuid.uuid4().hex[:16],'pause_s':b['pause_ms']/1000,
+              'asset_id':audio['id'],'asset_name':audio.get('original_name') or audio.get('name'),
+              'asset_revision':audio.get('revision'),'source_in_s':b['audio_in_ms']/1000,
+              'source_out_s':(b['audio_in_ms']+b.get('audible_dialogue_duration_ms',b['audio_out_ms']-b['audio_in_ms']))/1000,
+              'audio_source_in_s':b['audio_in_ms']/1000,'audio_source_out_s':b['audio_out_ms']/1000,
+              'audible_duration_s':b.get('audible_dialogue_duration_ms',b['audio_out_ms']-b['audio_in_ms'])/1000,
+              'silent_tail_s':b.get('silent_picture_tail_ms',0)/1000,
+              'picture_duration_s':b.get('duration_ms')/1000,
+              'picture_asset_id':picture['id'],'picture_asset_name':picture.get('original_name') or picture.get('name'),
+              'picture_asset_revision':picture.get('revision'),
+              'picture_source_in_s':(b.get('source_in_ms') or 0)/1000,
+              'picture_source_out_s':(b.get('source_out_ms') or 0)/1000,
+              'picture_status':b.get('picture_status'),'image_prompt':b.get('image_prompt',''),
+              'narration_name':voice.get('name'),'narration_size':stat.st_size if stat else None,
+              'narration_mtime_ns':stat.st_mtime_ns if stat else None}
         bite.update(script_beat=b['label'],script_caption=b['caption'],script_direction=b['direction'],speaker_declared=b.get('speaker',''))
         bites.append(bite)
     # A narration-only film (an editing guide with no audio breaks) has no bites; that is
@@ -142,20 +210,25 @@ def prepare(project, root, approved_gaps, approved_overlaps, allow_tail, has_aud
     bite_spans=[]
     for seg in timeline['segments']:
         if seg['kind']!='sound_bite':continue
-        a=files.get(seg['asset_name'])
-        if not a:raise ValueError(f"Sound bite source {seg['asset_name']} is not uploaded.")
+        picture_name=seg.get('picture_asset_name') or seg['asset_name']
+        a=next((x for x in assets if x.get('id')==seg.get('picture_asset_id')),None) or files.get(picture_name)
+        if not a:raise ValueError(f"Sound bite picture {picture_name} is not uploaded.")
         bite_spans.append({'start':round(seg['timeline_in_s']*1000),'end':round(seg['timeline_out_s']*1000),
-                           'source_in':round(seg['source_in_s']*1000),'source_out':round(seg['source_out_s']*1000),
+                           'source_in':round(seg.get('picture_source_in_s',seg['source_in_s'])*1000),'source_out':round(seg.get('picture_source_out_s',seg['source_out_s'])*1000),
                            # The slot carries the speaker the script wrote for this
                            # bite, so the caption burned on the bite and the one the
                            # audit checks are the same string.
-                           'filename':seg['asset_name'],'beat':'sound-bite','bite_id':seg['id'],
+                           'filename':picture_name,'beat':'sound-bite','bite_id':seg['id'],
                            'script_beat':next((x.get('script_beat') for x in bites if x['id']==seg['id']),None),
                            'caption':(next((x.get('script_caption') or x.get('caption') or '' for x in bites if x['id']==seg['id']),'') or 'None'),
-                           'direction':f"Sound bite: {seg['asset_name']} on camera.",'gap':True})
+                           'direction':f"Sound bite audio: {seg['asset_name']} · picture: {picture_name}.",'picture_status':seg.get('picture_status'),'image_prompt':seg.get('image_prompt',''),'gap':True})
     spans=[]
     for b in narratives:
-        spans.append({'start':b['narration_in_ms'],'end':b['narration_out_ms'],'source_in':b['source_in_ms'],'source_out':b['source_out_ms'],'filename':b['source_file'],'beat':b['label'],'caption':b['caption'],'direction':b['direction'],'gap':False})
+        picture_key=b.get('_picture_key') or b.get('source_file')
+        spans.append({'start':b['narration_in_ms'],'end':b['narration_out_ms'],
+                      'source_in':b.get('source_in_ms') or 0,'source_out':b.get('source_out_ms') or 0,
+                      'filename':picture_key,'beat':b['label'],'caption':b['caption'],'direction':b['direction'],
+                      'picture_status':b.get('picture_status'),'image_prompt':b.get('image_prompt',''),'gap':False})
     for key,g in gaps.items():
         end=key[1]
         # The approved tail is picture only. Extend to the enclosing output frame.
@@ -234,17 +307,28 @@ def prepare(project, root, approved_gaps, approved_overlaps, allow_tail, has_aud
             # dropped above as sub-frame) belongs to this slot, not to the line before it.
             cue=next((b for b in reversed(blocks) if b['start_ms']<narr_at+500/30),blocks[0]);a=files[span['filename']]
             source_ms=span['source_in']+(start-span['start']);source_end_ms=span['source_in']+(end-span['start'])
-            if source_ms<span['source_in']-.001 or source_end_ms>span['source_out']+1:raise ValueError('A picture slot exceeds its explicitly approved source range.')
-            try:recorded_fps=str(source_rate(root/a['path']))
+            if a.get('kind')=='video' and (source_ms<span['source_in']-.001 or source_end_ms>span['source_out']+1):raise ValueError('A picture slot exceeds its explicitly approved source range.')
+            if a.get('kind')!='video':source_ms=source_end_ms=0
+            try:recorded_fps=str(source_rate(root/a['path'])) if a.get('kind')=='video' else ''
             except ValueError:recorded_fps=''
-            row={'source_fps':recorded_fps,'shot_id':f"Srt{cue['number']:03d}",'source_file':span['filename'],**({'bite_id':span['bite_id']} if span.get('bite_id') else {}),'source_in_ms':round(source_ms),'source_out_ms':round(source_end_ms),'timeline_in_ms':round(start),'timeline_out_ms':round(end),'srt_blocks':[cue['number']],'required_caption':span['caption'],'continuity':f"Documentary beat {span['beat']}",'plain_cue':True,'script_beat':span.get('script_beat') or span['beat']}
+            sound = next((x for x in bites if x['id']==span.get('bite_id')),None)
+            row={'source_fps':recorded_fps,'shot_id':f"Srt{cue['number']:03d}",'source_file':span['filename'],
+                 'picture_source_file':span['filename'],'picture_status':span.get('picture_status') or ('UPLOADED PHOTO' if a.get('kind')=='image' else 'PROVISIONAL VIDEO'),
+                 'image_prompt':span.get('image_prompt',''),
+                 **({'bite_id':span['bite_id']} if span.get('bite_id') else {}),
+                 **({'sound_source_file':sound.get('asset_name'),'wav_local_in_ms':round(sound.get('audio_source_in_s',sound['source_in_s'])*1000),'wav_local_out_ms':round(sound.get('audio_source_out_s',sound['source_out_s'])*1000),'audible_dialogue_duration_ms':round(sound.get('audible_duration_s',sound['source_out_s']-sound['source_in_s'])*1000),'silent_picture_tail_ms':round(sound.get('silent_tail_s',0)*1000)} if sound else {}),
+                 'source_in_ms':round(source_ms),'source_out_ms':round(source_end_ms),'timeline_in_ms':round(start),'timeline_out_ms':round(end),'srt_blocks':[cue['number']],'required_caption':span['caption'],'continuity':f"Documentary beat {span['beat']}",'plain_cue':True,'script_beat':span.get('script_beat') or span['beat']}
             scenes.append({'id':uuid.uuid4().hex[:16],'srt_blocks':[cue['number'],cue['number']],'frame_in':fi,'frame_out':fo,'narration':cue['text'],'purpose':'documentary review','emotion':'neutral','focus':span['direction'] or 'Documentary footage','category':'general','person':'','asset_id':a['id'],'in_s':round(source_ms/1000,6),'motion':'auto','transition':'cut','context_only':False,'notes':'','approved':False,'profile':project.get('profile','documentary'),'focus_position':'center','motion_strength':'subtle','plan_row':row})
     if not scenes or scenes[0]['frame_in']!=0 or any(a['frame_out']!=b['frame_in'] for a,b in zip(scenes,scenes[1:])):raise ValueError('The frame-aligned picture plan has a gap or overlap.')
     _script_transitions(scenes,beats)
     staged=copy.deepcopy(project);staged['scenes']=scenes;staged['review_only_draft']=True;staged['script_moving_only']=True
     staged['script_application']={'recognized_instructions':len(beats),'placed_scenes':len(scenes),'issues':[],'mode':'documentary_beat_review','note':'Review storyboard only. On-screen captions, final fade and final export are not implemented.'}
-    staged['documentary_beat_review']={'fitted_beats':[{'label':b['label'],'kind':b['kind'],'source_file':b['source_file'],
-        'source_in_ms':b['source_in_ms'],'source_out_ms':b['source_out_ms'],
+    staged['documentary_beat_review']={'fitted_beats':[{'label':b['label'],'kind':b['kind'],'source_file':b.get('source_file',''),
+        'picture_file':b.get('picture_file',''),'picture_status':b.get('picture_status'),'image_prompt':b.get('image_prompt',''),
+        'source_in_ms':b.get('source_in_ms'),'source_out_ms':b.get('source_out_ms'),
+        'audio_file':b.get('audio_file',''),'audio_in_ms':b.get('audio_in_ms'),'audio_out_ms':b.get('audio_out_ms'),
+        'audible_dialogue_duration_ms':b.get('audible_dialogue_duration_ms'),'silent_picture_tail_ms':b.get('silent_picture_tail_ms'),
+        'master_in_ms':b.get('master_in_ms'),'master_out_ms':b.get('master_out_ms'),
         'narration_in_ms':b.get('narration_in_ms'),'narration_out_ms':b.get('narration_out_ms'),
         'pause_ms':b.get('pause_ms'),'caption':b['caption']} for b in beats],
         'fitted_ranges':copy.deepcopy(fitted_ranges),
@@ -256,11 +340,13 @@ def prepare(project, root, approved_gaps, approved_overlaps, allow_tail, has_aud
         # both then reported the bite with an empty caption and silently dropped it.
         'sound_bites':[{'bite_id':seg['id'],
                         'script_beat':next((x['script_beat'] for x in bites if x['id']==seg['id']),None),
-                        'source_file':seg['asset_name'],
+                        'source_file':seg.get('picture_asset_name') or seg['asset_name'],'picture_source_file':seg.get('picture_asset_name') or seg['asset_name'],'sound_source_file':seg['asset_name'],
+                        'wav_local_in_ms':round(seg['source_in_s']*1000),'wav_local_out_ms':round(seg['source_out_s']*1000),
+                        'audible_dialogue_duration_ms':round(seg.get('audible_duration_s',seg['source_out_s']-seg['source_in_s'])*1000),'silent_picture_tail_ms':round(seg.get('silent_tail_s',0)*1000),
                         'timeline_in_ms':round(seg['timeline_in_s']*1000),
                         'timeline_out_ms':round(seg['timeline_out_s']*1000),
-                        'source_in_ms':round(seg['source_in_s']*1000),
-                        'source_out_ms':round(seg['source_out_s']*1000),
+                        'source_in_ms':round(seg.get('picture_source_in_s',seg['source_in_s'])*1000),
+                        'source_out_ms':round(seg.get('picture_source_out_s',seg['source_out_s'])*1000),
                         'required_caption':(next((x.get('script_caption') or '' for x in bites if x['id']==seg['id']),'') or None)}
                        for seg in timeline['segments'] if seg['kind']=='sound_bite'],
         'sub_frame_gaps':[{'narration_in_ms':a,'narration_out_ms':b,'length_ms':b-a} for a,b in sub_frame],'script_sha256':hashlib.sha256(project['production_script']['text'].encode()).hexdigest(),'approved_gaps':copy.deepcopy(approved_gaps),'approved_overlaps':copy.deepcopy(approved_overlaps),'silent_tail_authorized':bool(allow_tail),'warning':'Review only: source content, identity, context and rights are unverified; script captions and final fade are not rendered.'}

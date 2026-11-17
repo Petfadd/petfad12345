@@ -1,0 +1,526 @@
+================================================================================
+DOCUMENTARY PRODUCTION SCRIPT — REUSABLE TEMPLATE FOR THE STORYROOM EDITOR
+================================================================================
+
+This is the one format for every production: any case, any length (8, 10, 20 minutes
+or more). The editor reads it directly. Everything in it is either something the
+editor reads, or something you must get right so the picture matches the narration.
+
+Read sections 0 to 7 once. Then write your script in section 9 at the bottom.
+You can upload this whole file once section 9 is filled in: the guide above it is
+ignored, because no example below starts a line with "Beat:" and a number, and no
+example table has real block numbers. (A fully filled-in example is in
+Worked_Example_Production_Script.txt.)
+
+Contents
+  0  How a production comes together
+  1  The naming system (one name per file, used everywhere)
+  2  People: victim, suspect, family
+  3  The narration table (your SRT)
+  4  The beats: field reference and templates A–H
+  5  The rules the editor checks
+  6  Visuals that follow the narration
+  7  Checklist before you upload
+  8  After you upload
+  9  YOUR SCRIPT (write here)
+
+
+================================================================================
+0  HOW A PRODUCTION COMES TOGETHER
+================================================================================
+
+You deliver five things. They all use the same file names (section 1).
+
+  1. Narration audio      The voice-over, one file (.mp3 or .wav). Its length is the
+                          narration clock.
+  2. SRT                  Either an .srt file, or the narration table in section 3.
+                          Every narration line, with its exact time.
+  3. Production script    This file: the beats, in order.
+  4. Footage sheet (.md)  Every link to download: footage (SRC), people's photos (P)
+                          and b-roll (B). See Footage_Sheet_Template.md. The importer
+                          downloads each link once and names the files for you.
+  5. People               Victim, suspect and family, each with a photo: in the sheet
+                          (P rows) or uploaded in Setup → 07 People on screen.
+
+Upload order in the editor:
+  narration audio → SRT (or this script, if it holds the table) → footage sheet
+  (downloads start) → production script → People → build.
+
+What the finished film is made of:
+  - Narration, over footage chosen line by line to show what the narrator is saying.
+  - Sound bites: real people speaking, footage and sound untouched, narration paused.
+  - People's photos, full screen, when the narration names them (section 2).
+  - Background music, if added: under the narration only, silent during sound bites.
+
+
+================================================================================
+1  THE NAMING SYSTEM
+================================================================================
+
+One file, one name, written exactly the same in the sheet, the script and the editor.
+
+  Kind               Sheet ID        File name           Where it goes
+  -----------------  --------------  ------------------  -------------------------------
+  Footage            SRC-01          S01.mp4             Footage. Downloaded WHOLE, from
+                                                         0:00, so the times you write
+                                                         from the YouTube player are the
+                                                         times in the file.
+  B-roll (video)     B01             B01.mp4             Footage. If the sheet gives a
+                                                         window (0:43-0:58), only that
+                                                         part is downloaded, and the
+                                                         file's own clock starts at 0.
+  Base picture       B02 / BASE-01   B02.jpg / BASE-01   Photos. A still of a place or
+                                                         thing (a street sign, a map).
+  Person's photo     P01             P01.jpg             Photos and People. Shown when
+                                                         the narration names them.
+
+Rules
+  - Numbers have two digits (S01 … S99); three if a production has more than 99.
+  - Write the extension in the script: S01.mp4, B01.mp4. Never a path or a folder.
+  - A name you write in the sheet is used exactly (e.g. Mother.jpg, Garage_cam.mp4).
+  - Gaps in numbering are allowed; numbers are never reused for a different link.
+  - Times for SRC files are YouTube times. Times for B files with a window start at 0
+    at the start of that window (a window 0:43-0:58 makes a 15-second B file).
+  - Photos are never written in a beat. A beat names a video. Photos are placed by
+    the editor (section 2) and base pictures by the visual plan (section 6).
+
+
+================================================================================
+2  PEOPLE: VICTIM, SUSPECT, FAMILY
+================================================================================
+
+List everyone whose photo should appear when they are named. Copy this list into
+Setup → 07 People on screen, or give each one a P row in the footage sheet.
+
+  Name as the narration says it   Role                    Photo
+  ------------------------------  ----------------------  -----------------------
+  [Full Name]                     Victim                  P01.jpg
+  [Full Name]                     Suspect                 P02.jpg
+  [Full Name]                     Mother                  P03.jpg
+  [Full Name]                     Father                  P04.jpg
+  [Full Name]                     Brother                 P05.jpg
+  [Full Name]                     Suspect's mother        P06.jpg
+
+Roles
+  - A plain role (Mother, Father, Brother) means the VICTIM'S family.
+  - Somebody else's relative names whose: "Suspect's mother", "Mother of [Name]".
+    That is how "Thompson's mother" finds the right person and never the victim's.
+
+How names are matched
+  - The narration's own spelling is found in the SRT automatically ("Jon" for
+    John, "Kaytlin" for Caitlin). Check the list under each person in 07: every line
+    that names them is shown, and you can untick any line that is not them.
+  - "[Victim]'s mother said…" shows the mother, not the victim.
+  - A line matched only on a first name or surname is marked "check it is them".
+
+When a photo appears
+  - In the opening (default: the first two scenes; a scene is the narration between
+    two sound bites) every mention pops the photo up full screen for the whole line.
+  - After the opening, footage that shows the person plays instead. Their photo fills
+    in only where no footage of them is available.
+  - The first time anyone is named, wherever it falls, their photo pops up.
+  - Never during a sound bite. A sound bite always plays its own footage.
+
+What this means for your writing
+  - Say the full name the first time a person appears in the narration.
+  - Say it again in the line where you want their face on screen.
+  - Write the name the way the narrator says it, in the narration AND in the SRT.
+  - If you have footage of them (an interview, a court appearance, a news clip), use
+    it after the opening and say so in the Visual direction (section 6).
+
+
+================================================================================
+3  THE NARRATION TABLE (YOUR SRT)
+================================================================================
+
+Upload an .srt, or put this table in section 9. Its wording, order and timing are
+copied exactly. Shape (with real numbers in place of N and the times):
+
+  Narration blocks:
+
+  | Block | Narration timeline | Wording |
+  |---|---|---|
+  | N | 00:00:00,000 → 00:00:05,200 | [exact words spoken] |
+  | N | 00:00:05,200 → 00:00:11,000 | [exact words spoken] |
+
+Rules (each one is checked)
+  1. Block 1 starts at 00:00:00,000.
+  2. Each block starts exactly where the previous one ends. No holes, no overlaps.
+  3. Blocks are numbered 1, 2, 3 … with none skipped.
+  4. The last block ends where the narration audio ends. Upload the SRT exactly as
+     exported: up to 3 s of difference (silence after the last word, or a last line
+     held past the audio) is handled without trimming or editing either file.
+  5. One block is one stretch of speech, in the words actually spoken.
+  6. Every narration beat (section 4) starts and ends on a block boundary. That is
+     what keeps every cut on a line, never in the middle of a word.
+
+If an .srt is uploaded too, the .srt wins and the table is ignored.
+
+
+================================================================================
+4  THE BEATS
+================================================================================
+
+A beat is one piece of the film: narration over footage, or a sound bite.
+
+Header (once, before the first beat)
+
+  PROJECT: [case title]
+  SOURCES: [every file the beats name, e.g. S01.mp4, S02.mp4, B01.mp4]
+  FORMAT: Beat-by-Beat Documentary (Voice Over & Sync Sound Bites)
+  TOTAL MASTER RUNTIME: [narration length + every bite's duration, HH:MM:SS,mmm]
+
+Field reference
+
+  Beat:                  001, 002, 003 … on its own line. Starts a new beat.
+  Type:                  VOICE OVER   or   DOCUMENTARY SOUND BITE
+  Master timeline:       Where the beat sits in the finished film.
+                         A bite adds (Duration: N sec).
+  Narration clock:       Narration:  00:00:00,000 --> 00:00:18,000
+                         After bites: RESUMES at 00:00:30,000 --> 00:00:45,000
+                         A bite:     PAUSED at 00:00:30,000
+  Narration state:       PLAYING / RESUMING on narration; PAUSED (…) on a bite.
+  Spoken narration:      Narration only: the exact words of this span.
+  Speaker:               Bite only: who speaks (as you believe; not verified).
+  Exact spoken dialogue: Bite only: what is said in the chosen range.
+  Duration:              Bite only, if not on the Master timeline line:
+                         Duration: 00:00:10,000
+  Full source:           The exact file name: S01.mp4, B01.mp4.
+  Source in / Source out The range inside that file, HH:MM:SS,mmm.
+  Footage audio:         MUTED (0%) on narration; UNMUTED (100% …) on a bite.
+  Cut action:            How the beat begins (CUT TO …, HARD CUT TO SPEAKER,
+                         FADE IN FROM BLACK). An editing note.
+  Visual direction:      What must be on screen. Read by the visual plan (section 6),
+                         so name the place, person or thing shown.
+  On-screen caption:     The literal text to burn in, or None.
+  Continuity note:       Notes for you. Ignored by the checks.
+
+In the templates below, replace every [bracket] and write a real number in place
+of ###. A line that starts "Beat:" followed by digits begins a real beat.
+
+--------------------------------------------------------------------------------
+TEMPLATE A — narration over footage
+--------------------------------------------------------------------------------
+
+Beat: ###
+Type: VOICE OVER
+Master timeline: [master in] --> [master out]
+Narration clock: [narration in] --> [narration out]
+Narration state: PLAYING
+Spoken narration: "[the exact words of the blocks this beat covers]"
+Full source: [S01.mp4]
+Source in: [HH:MM:SS,mmm]
+Source out: [Source in + the beat's length]
+Footage audio: MUTED (0%)
+Cut action: CUT TO [what we see]
+Visual direction: [the place, person or thing on screen, in plain words]
+On-screen caption: [text, or None]
+Continuity note: [optional]
+
+  Length rule: narration out − in = source out − in = master out − in.
+
+--------------------------------------------------------------------------------
+TEMPLATE B — a sound bite
+--------------------------------------------------------------------------------
+
+Beat: ###
+Type: DOCUMENTARY SOUND BITE
+Master timeline: [master in] --> [master out] (Duration: [N] sec)
+Narration clock: PAUSED at [the narration out of the beat before]
+Narration state: PAUSED (Suspended for duration of bite)
+Speaker: [Name, role]
+Exact spoken dialogue: "[exactly what they say in this range]"
+Full source: [S03.mp4]
+Source in: [where they start speaking]
+Source out: [where they finish the thought]
+Footage audio: UNMUTED (100% Dialogue Level, Clean)
+Cut action: HARD CUT TO SPEAKER
+Visual direction: [the speaker on screen, one unbroken take]
+On-screen caption: [Name — role, or None]
+Continuity note: [optional]
+
+  Length rule: source out − in = Duration = master out − in.
+  The speaker must be on screen for the whole range (check the frames, section 5).
+  Choose in and out at the edges of the thought: not mid-word, not mid-breath, not
+  with the reporter's question still running.
+
+--------------------------------------------------------------------------------
+TEMPLATE C — narration that resumes after a bite
+--------------------------------------------------------------------------------
+
+Beat: ###
+Type: VOICE OVER
+Master timeline: [the master out of the last bite] --> [+ length]
+Narration clock: RESUMES at [the PAUSED time] --> [narration out]
+Narration state: RESUMING
+Spoken narration: "[the exact words from the pause onward]"
+Full source: [S01.mp4]
+Source in: [HH:MM:SS,mmm]
+Source out: [HH:MM:SS,mmm]
+Footage audio: MUTED (0%)
+Cut action: CUT TO [what we see]
+Visual direction: [what is on screen]
+On-screen caption: None
+Continuity note: [optional]
+
+--------------------------------------------------------------------------------
+TEMPLATE D — a second bite at the same pause (two voices back to back)
+--------------------------------------------------------------------------------
+
+Exactly like Template B, with the SAME "PAUSED at" time as the bite before it.
+Its Master timeline starts where that bite ended. The editor lists back-to-back
+bites on the Beat picture plan screen and builds them when you confirm.
+
+--------------------------------------------------------------------------------
+TEMPLATE E — a hook: the film opens on a sound bite
+--------------------------------------------------------------------------------
+
+Beat: ###
+Type: DOCUMENTARY SOUND BITE
+Master timeline: 00:00:00,000 --> [duration] (Duration: [N] sec)
+Narration clock: PAUSED at 00:00:00,000
+Narration state: PAUSED (Suspended for duration of bite)
+Speaker: [the strongest voice in the case]
+Exact spoken dialogue: "[the line that makes a viewer stay]"
+Full source: [S03.mp4]
+Source in: [HH:MM:SS,mmm]
+Source out: [HH:MM:SS,mmm]
+Footage audio: UNMUTED (100% Dialogue Level, Clean)
+Cut action: HARD CUT TO SPEAKER
+Visual direction: [a face, live footage — never a station card or logo]
+On-screen caption: [Name — role]
+Continuity note: Hook. The first narration beat starts at this bite's master out,
+  with its narration clock at 00:00:00,000.
+
+  Up to three hook bites, all "PAUSED at 00:00:00,000"; only their Master timeline
+  moves forward. A cold open of 15-35 seconds in all.
+
+--------------------------------------------------------------------------------
+TEMPLATE F — narration that names a person (their photo appears)
+--------------------------------------------------------------------------------
+
+Write a normal Template A or C beat. Do NOT put the photo in the beat. Say the
+person's full name in the narration, and choose footage for the rest of the line:
+
+  Spoken narration: "On the night of March 14th, [Victim Full Name] finished his
+                    shift at [Place]."
+  Full source: S01.mp4                       (footage of the place, the scene)
+  Visual direction: [Place] at night. [Victim Full Name]'s photo pops up for his
+                    name (opening).
+
+In the opening, the photo covers that whole line. After the opening, if you have
+footage of the person, point the beat at it and the footage plays instead:
+
+  Full source: S05.mp4                       (the news clip that shows the suspect)
+  Visual direction: [Suspect Full Name] in court, the clip where he stands.
+
+--------------------------------------------------------------------------------
+TEMPLATE G — b-roll from the footage sheet
+--------------------------------------------------------------------------------
+
+A B file is a video like any other, so a beat can name it directly:
+
+Beat: ###
+Type: VOICE OVER
+Master timeline: [master in] --> [master out]
+Narration clock: [narration in] --> [narration out]
+Narration state: PLAYING
+Spoken narration: "[the words this picture illustrates]"
+Full source: B01.mp4
+Source in: 00:00:01,000              (B files with a window start at 0)
+Source out: [inside the B file's length]
+Footage audio: MUTED (0%)
+Cut action: CUT TO B-ROLL
+Visual direction: [exactly what the sheet says B01 shows]
+On-screen caption: None
+Continuity note: B01 — [description from the sheet].
+
+  B-roll you do not name in a beat is still used: the visual plan places it on the
+  lines that mention what it shows (section 6). Base pictures (B02.jpg, BASE-01)
+  are never named in a beat.
+
+--------------------------------------------------------------------------------
+TEMPLATE H — the same scene continuing
+--------------------------------------------------------------------------------
+
+When the narration stays on the same idea, keep the same footage running: start the
+next beat in the same file where the last one stopped.
+
+  Beat 002   Full source: S01.mp4   Source in: 00:00:05,000   Source out: 00:00:23,000
+  Beat 006   Full source: S01.mp4   Source in: 00:00:23,000   Source out: 00:00:38,000
+
+The picture flows on instead of jumping. Change the file when the subject changes:
+a new place, a new person, a new time.
+
+
+================================================================================
+5  THE RULES THE EDITOR CHECKS
+================================================================================
+
+THE ONE THAT BREAKS EVERYTHING
+  Every Source out must be inside the file it names. Note every file's real length
+  (the importer shows it) and check each beat against it.
+
+THE NARRATION CLOCK — the voice-over file's own clock
+  - Starts at 00:00:00,000 and never jumps.
+  - A bite is "PAUSED at" the narration out of the beat before it.
+  - The next narration "RESUMES at" that same time.
+  - The last narration out equals the end of the SRT's last block.
+  - Narration beats in a row simply continue: 00:00:18,000 --> 00:00:30,000.
+
+THE MASTER CLOCK — the finished film's clock
+  - Starts at 00:00:00,000 and never pauses.
+  - Each beat starts where the last one ended.
+  - A narration beat lasts as long as its narration; a bite lasts its Duration.
+  - TOTAL MASTER RUNTIME = narration length + every bite's Duration. Work it out;
+    do not guess it. A runtime that is not this sum means the plan is wrong.
+
+LENGTHS
+  Narration beat:  narration out − in = source out − in = master out − in
+  Sound bite:      source out − in = Duration = master out − in
+
+TIMECODES
+  Always HH:MM:SS,mmm: 00:01:15,600. Two digits, two, two, then three after a comma.
+
+FILE NAMES
+  Exactly as in the sheet, with the extension, no path: Full source: S01.mp4
+
+FIELDS
+  - Type, Narration state, Footage audio and the clocks must be exactly as shown.
+  - One field, one line, once per beat. Two "Source in" lines in a beat is an error.
+  - Beats are numbered 001, 002 … in order, no repeats, no gaps.
+  - Nothing else may start a line with "Beat:" and a number.
+
+ORDER
+  - A bite follows narration, or another bite at the same pause (Template D).
+  - The film may open on bites (Template E) and may close on a bite.
+
+THE PICTURE MUST BE LIVE
+  The checks measure time, not what is on screen. Before you write a bite's range,
+  look at the frames: the speaker must be visible from in to out. A station logo,
+  a "subscribe" card or an app promo is not a speaker. Broadcast files are often live
+  for their first seconds and a graphic afterwards.
+
+REUSING FOOTAGE
+  The same shot may return later under different narration. The editor lists every
+  repeat for you to approve. The exact same range twice is refused.
+
+CAPTIONS
+  On-screen caption is the literal burned-in text. Write None where there is none.
+  Captions are held back while a person's photo covers the screen.
+
+CUTS ARE EXACT
+  - Picture cuts land on the frame your in and out times fall on. Sound bites and
+    narration are cut to the sample.
+  - Cut where the meaning lands: narration beats on SRT block boundaries; bites at
+    the start and end of the speaker's thought.
+  - Footage at different frame rates (25, 29.97, 30, 60 fps) can be mixed; the
+    editor fits each clip to its slot without moving a cut.
+
+WHAT THE EDITOR WILL AND WILL NOT DO
+  It fits a narration beat's picture to its narration (shortens a range that is too
+  long, extends one that is too short inside the same file) and records every change.
+  It never edits your script, never swaps in a file you did not name, never speeds up
+  or repeats footage, and never decides who a speaker is.
+
+
+================================================================================
+6  VISUALS THAT FOLLOW THE NARRATION
+================================================================================
+
+The editor's Visual plan picks the picture for every narration line, in this order:
+
+  1. A person named        Their photo in the opening; footage of them after it;
+                           their photo if no footage of them exists.
+  2. The same idea         The shot on screen keeps running into its next frames,
+     continuing            so the picture does not jump on every line.
+  3. A matching shot       Footage whose description matches the line's words: the
+                           place, the people, the thing being talked about.
+  4. Your script's choice  The beat's own Full source and range.
+  5. A base picture        A matching B picture from the sheet (within the 20% limit
+                           on stills).
+  6. A plain place shot    The general scene, as a last resort.
+
+It knows what each shot shows from four places: your Visual direction lines, the
+footage sheet's descriptions, the guide cards, and the shot catalogue. The words you
+write there decide the match. So:
+
+Write Visual direction like this
+  - Name what is on screen: "Oak Ridge Mall parking garage at night, level three."
+  - Name the person when they are visible: "Mark Cole in court, standing."
+  - Name the kind of shot: exterior, interior, aerial, CCTV, map, document, vigil,
+    press conference, search, police cars, courtroom.
+  - One idea per beat. If the narration moves to a new place, start a new beat.
+
+Not like this
+  - "B-roll", "Footage", "Generic shot", "Scene" — these match nothing.
+  - "Sad music moment", "Dramatic" — feelings are not pictures.
+  - A place the footage does not show. Describe the frames, not the story.
+
+Describe b-roll in the sheet the same way
+  | B01 | Oak Ridge Mall parking garage at night, level three | 0:43-0:58 | link |
+  A b-roll that names something specific (the mall, the street) is saved for the
+  line that names it and is never used up as filler on an unrelated line.
+
+What picture goes where
+  - A named place           Footage of that place (exterior, street, aerial).
+  - Police, the search      Police cars, officers, search teams, K-9, volunteers.
+  - Court, the trial        Courthouse, courtroom, the defendant in court.
+  - Evidence, records       Documents, maps, CCTV, the scene with tape.
+  - Grief, memory           Vigil, memorial, family photos (people's photos rule).
+  - A timeline moment       A map, a calendar, the location at that time of day.
+
+Never
+  - Cover a speaker with b-roll, or a sound bite with a photo.
+  - Use stock footage that is not from this case's own sources.
+  - Show a suspect's mugshot before the narration says they were arrested.
+  - Put a different person's face on a line that names someone else.
+
+
+================================================================================
+7  CHECKLIST BEFORE YOU UPLOAD
+================================================================================
+
+  [ ] Every file named in a beat is in the footage sheet, with the same name.
+  [ ] Every Source out is within its file's real length.
+  [ ] Narration: first beat at 0; each PAUSED = the narration out before it; each
+      RESUMES = that PAUSED time; last narration out = last SRT block's end.
+  [ ] Master: each beat starts where the last ended; last out = TOTAL RUNTIME.
+  [ ] TOTAL RUNTIME = narration length + every bite's Duration.
+  [ ] Lengths: narration out−in = source out−in; bite source out−in = Duration.
+  [ ] Every narration beat starts and ends on an SRT block boundary.
+  [ ] Every bite's speaker is on screen from in to out (frames checked).
+  [ ] The hook (if any) opens on a face or live footage.
+  [ ] Every person who should appear is in the People list with a photo, and their
+      full name is spoken the first time they appear.
+  [ ] Every Visual direction names what is on screen.
+  [ ] Every beat has an On-screen caption line: text or None.
+  [ ] No photo file (.jpg, .png) in any "Full source" line.
+
+
+================================================================================
+8  AFTER YOU UPLOAD
+================================================================================
+
+  1. Read the Production script panel: anything listed is a real conflict with
+     your files. Fix it in the script and upload it again.
+  2. 07 People on screen: check the lines under each person; untick any that are
+     not them; look at the yellow "check it is them" lines.
+  3. Visual plan: build it, read the shot chosen for each line and why, swap any.
+  4. Beat picture plan: read the range changes and repeated footage, then build.
+  5. Watch the timeline. Photos, sound bites and music should all sit on their lines.
+
+
+================================================================================
+9  YOUR SCRIPT (write below this line; delete these two lines)
+================================================================================
+
+Narration blocks:
+
+| Block | Narration timeline | Wording |
+|---|---|---|
+
+PROJECT:
+SOURCES:
+FORMAT: Beat-by-Beat Documentary (Voice Over & Sync Sound Bites)
+TOTAL MASTER RUNTIME:

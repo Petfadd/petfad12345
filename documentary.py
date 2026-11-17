@@ -78,7 +78,11 @@ def annotate_plan(project,root,plan):
     assets={a['id']:a for a in project.get('assets',[])};voice=project.get('voiceover') or {};path=Path(root)/voice.get('path','')
     for bite in plan['bites']:
         asset=assets.get(bite['asset_id']);reasons=[]
-        if not asset or asset.get('revision')!=bite.get('asset_revision') or not (Path(root)/asset.get('path','')).is_file():reasons.append('Source video was removed or replaced; review this bite again.')
+        if not asset or asset.get('revision')!=bite.get('asset_revision') or not (Path(root)/asset.get('path','')).is_file():reasons.append('Soundbite audio was removed or replaced; review this bite again.')
+        picture_id=bite.get('picture_asset_id')
+        if picture_id:
+            picture=assets.get(picture_id)
+            if not picture or picture.get('revision')!=bite.get('picture_asset_revision') or not (Path(root)/picture.get('path','')).is_file():reasons.append('Soundbite picture was removed or replaced; review this bite again.')
         if not path.is_file() or path.stat().st_size!=bite.get('narration_size') or path.stat().st_mtime_ns!=bite.get('narration_mtime_ns'):reasons.append('Narration changed; review the pause point again.')
         try:
             from documentary_speech import for_bite
@@ -133,9 +137,21 @@ def build_timeline(project, plan):
         for b in run:
             start=_number(b['source_in_s'],'Source IN');end=_number(b['source_out_s'],'Source OUT')
             if start<0 or end<=start:raise ValueError('A planned sound bite has invalid timings. Review it before continuing.')
-            # Spoken words are bite-relative, exactly as saved and reviewed; the
-            # preview adds them to this segment's own start on the edit clock.
-            span=end-start;segments.append({'kind':'sound_bite','id':b['id'],'asset_id':b['asset_id'],'asset_name':b['asset_name'],'source_in_s':start,'source_out_s':end,'timeline_in_s':round(output,3),'timeline_out_s':round(output+span,3),'narration_resume_s':at,'speech':list(b.get('speech') or [])});output+=span
+            # External sound can finish before its independent picture slot. The
+            # tail is explicit silence: no original B-roll audio and no music.
+            audible=end-start;picture_span=_number(b.get('picture_duration_s',audible),'Picture duration')
+            if picture_span < audible-.0005:raise ValueError('A sound-bite picture slot cannot end before its audible dialogue.')
+            tail=max(0.0,picture_span-audible)
+            segments.append({'kind':'sound_bite','id':b['id'],'asset_id':b['asset_id'],'asset_name':b['asset_name'],
+                             'source_in_s':start,'source_out_s':end,'audible_duration_s':round(audible,3),
+                             'silent_tail_s':round(tail,3),'picture_duration_s':round(picture_span,3),
+                             'picture_asset_id':b.get('picture_asset_id',b['asset_id']),
+                             'picture_asset_name':b.get('picture_asset_name',b['asset_name']),
+                             'picture_source_in_s':_number(b.get('picture_source_in_s',start),'Picture source IN'),
+                             'picture_source_out_s':_number(b.get('picture_source_out_s',end),'Picture source OUT'),
+                             'picture_status':b.get('picture_status'), 'image_prompt':b.get('image_prompt',''),
+                             'timeline_in_s':round(output,3),'timeline_out_s':round(output+picture_span,3),
+                             'narration_resume_s':at,'speech':list(b.get('speech') or [])});output+=picture_span
         cursor=at
     if cursor<duration:
         span=duration-cursor;segments.append({'kind':'narration','source_in_s':round(cursor,3),'source_out_s':duration,'timeline_in_s':round(output,3),'timeline_out_s':round(output+span,3)});output+=span

@@ -49,7 +49,7 @@ def audio_levels(project):
 
 
 def build_audio(root, project, plan, destination, progress=lambda *a:None, strict_handoffs=False, music=False, compact_preview=False):
-    bites=sum(float(b.get('source_out_s',0))-float(b.get('source_in_s',0)) for b in (plan or {}).get('bites') or [])
+    bites=sum(float(b.get('picture_duration_s',float(b.get('source_out_s',0))-float(b.get('source_in_s',0)))) for b in (plan or {}).get('bites') or [])
     with timebudget.film_length(float((project.get('voiceover') or {}).get('duration') or 0)+bites):
         return _build_audio(root,project,plan,destination,progress,strict_handoffs,music,compact_preview)
 
@@ -165,18 +165,19 @@ def _build_preview_audio(root, project, plan, destination, progress, final=False
     #    narration. Cached by source file, range and the narration level it matched.
     def bite(i,segment):
         a=assets.get(segment['asset_id'])
-        if not a or a.get('kind')!='video':raise ValueError('A sound-bite video is missing.')
+        if not a or a.get('kind') not in ('video','audio'):raise ValueError('A sound-bite audio source is missing.')
         source=(root/a.get('path','')).resolve()
-        if not source.is_relative_to(root/'sources') or not source.is_file():raise ValueError('A sound-bite video is missing.')
-        start=float(segment['source_in_s']);end=float(segment['source_out_s']);expected=end-start
+        allowed=(root/'sources').resolve() if a.get('kind')=='video' else (root/'audio').resolve()
+        if not source.is_relative_to(allowed) or not source.is_file():raise ValueError('A sound-bite audio source is missing.')
+        start=float(segment['source_in_s']);end=float(segment['source_out_s']);expected=float(segment.get('picture_duration_s',end-start))
         s=source.stat()
-        key=_cache_key('bite',str(source),s.st_size,s.st_mtime_ns,round(start,4),round(end,4),round(narration_level['integrated_lufs'],2),AUDIO_PROCESSING_VERSION)
+        key=_cache_key('bite',str(source),s.st_size,s.st_mtime_ns,round(start,4),round(end,4),round(expected,4),round(narration_level['integrated_lufs'],2),AUDIO_PROCESSING_VERSION)
         part=cache/f'bite-{key}.wav';meta=cache/f'bite-{key}.json'
         if part.is_file() and meta.is_file():
             info=json.loads(meta.read_text(encoding='utf-8'));tick();return part,info
         coarse=max(0.0,start-2.0)
         raw=cache/f'bite-{key}.raw.wav'
-        measured=_cut_and_measure(ff,source,start,end,raw,coarse=coarse)
+        measured=_cut_and_measure(ff,source,start,end,raw,pad_to=round(expected*RATE),coarse=coarse)
         length=_wav_frames(raw)/RATE
         if abs(length-expected)>.025:
             raw.unlink(missing_ok=True)
@@ -308,13 +309,19 @@ def _build_audio(root, project, plan, destination, progress=lambda *a:None, stri
             if segment['kind']=='narration':source=narration
             else:
                 a=assets.get(segment['asset_id'])
-                if not a or a.get('kind')!='video':raise ValueError('A sound-bite video is missing.')
+                if not a or a.get('kind') not in ('video','audio'):raise ValueError('A sound-bite audio source is missing.')
                 source=(root/a.get('path','')).resolve()
-                if not source.is_relative_to(root/'sources') or not source.is_file():raise ValueError('A sound-bite video is missing.')
+                allowed=(root/'sources').resolve() if a.get('kind')=='video' else (root/'audio').resolve()
+                if not source.is_relative_to(allowed) or not source.is_file():raise ValueError('A sound-bite audio source is missing.')
             with av.open(str(source)) as media:
                 if not media.streams.audio:raise ValueError('A selected sound-bite video has no audio stream.')
             start=segment['source_in_s'];end=segment['source_out_s'];part=work/f'{i:04d}.wav'
             filt=f'atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=s16:sample_rates=48000:channel_layouts=stereo'
+            picture_duration=float(segment.get('picture_duration_s',end-start))
+            if segment['kind']=='sound_bite' and picture_duration > end-start+.000001:
+                # Authorised handle after dialogue: exact digital silence.  No source
+                # audio, B-roll audio or music is allowed to leak into this tail.
+                filt+=f',apad=whole_len={round(picture_duration*48000)}'
             # The SRT holds its last line a moment past the end of the narration file
             # (narration_clock_s). Every recorded sample is kept; the difference after
             # the file's last sample is silence, so the sound runs as long as the film.
@@ -329,7 +336,7 @@ def _build_audio(root, project, plan, destination, progress=lambda *a:None, stri
             # Refuse to silently extend a short or missing clip with silence.
             with av.open(str(part)) as media:
                 stream=media.streams.audio[0];length=float(stream.duration*stream.time_base) if stream.duration is not None else 0
-            expected=end-start
+            expected=picture_duration if segment['kind']=='sound_bite' else end-start
             if abs(length-expected)>.025:raise ValueError(f'Audio segment {i+1} decoded as {length:.3f}s instead of {expected:.3f}s. Check the source audio and selected range.')
             if strict_handoffs and i < len(timeline['segments'])-1 and abs(length-expected)>2/48000+.00000001:
                 raise ValueError(f'Audio segment {i+1} does not end on the planned sample boundary; final assembly stopped.')
