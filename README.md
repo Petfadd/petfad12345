@@ -1,0 +1,963 @@
+# Storyroom Editor
+
+A local Flask application that builds an SRT-driven video storyboard from uploaded narration, captions, a production script and MP4 source clips. It studies the uploaded videos, assembles clean-cut picture slots, and renders a continuous MP4 master for smooth Program-monitor playback.
+
+## Features
+
+- Upload-first workflow: SRT, voiceover, production script and MP4s, plus an optional
+  per-SRT-block map that points each caption block at a footage source interval.
+- Automatic media-use approval on upload; no manual source-review gate.
+- Automatic source study and storyboard assembly.
+- Automatic continuous-master rendering after assembly.
+- **Render MP4** button remains available to start another export.
+- Clips-only picture; no generated stills or blank slots.
+- Clean cuts by default. Short dissolves are available per scene when a production
+  allows them (`transition_policy`), and are validated: no dissolve off the last scene,
+  no adjacent pairs, never longer than the incoming beat, and the export length never
+  changes by a frame.
+- Six-slot cooldown for overlapping source intervals, available perceptual hashes and
+  explicitly declared `footage_group` labels. A group identifies a shot even when its
+  intervals do not overlap. Matching filenames and descriptions alone do not prove two
+  intervals are the same shot; they are not automatically grouped.
+- Cut conformance: every picture beat is kept inside one decoded shot of its source, and cuts are eased into the narrator's breaths (see below).
+- Original narration and SRT timing are preserved.
+- Source audio is muted; added captions are off.
+- Document/validator checks are separate from semantic identity or rights verification.
+
+## Performance and processing
+
+On a machine with an editor open, the expensive work is the problem: a 4K source is
+sixteen times the pixels of 1080p, and several operations that each want every core will
+between them make the interface stop responding.
+
+**Editing copies (proxies).** Uploaded video above 900 pixels high is copied once to 540p
+or 720p and that copy is what playback and scrubbing use. Measured on a 4K source:
+43.07 MB becomes 0.51 MB, 1.2% of the original, with duration, frame rate and audio
+preserved. Export never sees a proxy -- the renderer opens `sources/` directly and never
+reads over HTTP, so a delivered frame cannot come from one. The quality is chosen in
+Processing and storage, and changing it rebuilds the existing copies.
+
+**One queue.** Every heavy operation -- proxy making, media analysis, reframing, AI
+enhancement -- is submitted to a single dispatcher instead of starting its own threads.
+The order is: playback and editing, essential media loading, background analysis, AI
+enhancement, thumbnails. One heavy and one AI job run at a time, because two of them on
+16 GB is slower than one after the other. Pause, resume, cancel, retry and the queue
+itself are in Processing and storage. Pause and cancel both reach the work rather than
+only the label: pausing suspends the child encode and resuming continues it, and
+cancelling stops the whole process tree, so the machine is never still busy with
+something the queue has forgotten. Measured on a 180-second 4K source: 398 CPU ticks per
+two seconds while running, 0 while paused, 386 after resuming.
+
+**Hardware.** Encoders are tested rather than assumed: a build can list `h264_nvenc` on a
+machine with no NVIDIA driver, so each one is checked with a real one-frame encode.
+Hardware encoding is used for proxies only. Delivery stays on the software encoder,
+because at equal bitrate the hardware path is visibly worse. The graphics card itself is
+identified separately from encoder support -- Windows is asked through WMI, Linux through
+nvidia-smi or the DRM driver, macOS through `system_profiler` -- because a card can be
+present while this ffmpeg build has no encoder for it, and those are two different
+answers. Video memory is shown when the driver reports it and shown as unavailable when
+it does not, never as a zero that would look like an idle GPU.
+
+**Caching.** Everything expensive is cached under a key built from the source file's size,
+its modification time and the settings that shaped the result, so an entry cannot go
+stale and two scenes asking for the same frame share one file. Processing and storage
+shows what each kind holds, frees unused entries, or clears the cache. Cleanup only ever
+touches the cache folder; original footage and project files are outside it and a test
+plants a file beside it to prove it survives.
+
+**Recovery.** The project file was already written atomically, so a crash during a save
+could not corrupt it. Every save now also keeps a copy in `.history` inside the project,
+so a bad bulk edit can be undone. Jobs record their state, and a job interrupted by a
+crash comes back marked interrupted with a retry, rather than restarting by itself.
+
+**Where caches live.** Default is the local application data folder on Windows or the home
+folder elsewhere. Set another location in Processing and storage if the system drive is
+not an SSD; the folder is write-tested before it is accepted.
+
+### What was measured
+
+The acceptance tests below were run on the development machine — two cores, no graphics
+card, so the figures are a floor rather than a target. Every number is a measurement, not
+an estimate.
+
+| Check | Result |
+|---|---|
+| Four videos uploaded, four editing copies made at once | p95 response **53 ms**, worst 99 ms, **0 failed requests** (idle 2 ms) |
+| Memory during that work | **18–19%** of 16 GB, two encoders at 100% CPU |
+| Re-requesting four existing editing copies | **149 ms**, no bytes added to the cache: nothing rebuilt |
+| 4K 6-second source → editing copy | 43.07 MB → 0.51 MB (**1.2%**), 1.9 s, duration/fps/audio preserved |
+| A 180-second 1.3 GB 4K source, paused mid-encode | encoder stopped (**T**), **0 CPU ticks** over 3 s, progress held; **+201 ticks** after resume |
+| Same source, cancelled | encoder gone 2 s later, job marked cancelled, retry accepted and running again |
+| Two jobs mid-encode, server killed | both came back **interrupted**, not restarted, retry accepted |
+| Export path with ten editing copies in the cache | all four sources resolve the **full-resolution original** |
+| Whole test suite | **595 tests, OK** (11 skipped without optional pieces) |
+
+**What is not proven here.** The development machine has no graphics card, so `h264_amf`,
+Quick Sync and `nvidia-smi` readings were never exercised — the fallback to software
+encoding was, and it is what runs when a card or driver is missing. Hardware acceleration
+therefore reports itself only when a real one-frame encode succeeds on the actual machine.
+The Windows-specific graphics query is written but untested on Windows.
+
+## Requirements
+
+- Python 3.10+
+- FFmpeg, supplied through `imageio-ffmpeg`
+- The Python packages in `requirements.txt`, with `requirements-constraints.txt`
+
+## Install and run
+
+```sh
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r requirements.txt -c requirements-constraints.txt
+python app.py
+```
+
+The `-c` file is not optional. `scenedetect` declares a dependency on the *GUI*
+`opencv-python`, which pip installs beside the headless build this app needs; the two own
+the same `cv2` package, the GUI one wins, and `import cv2` then fails with a missing
+`libGL` — the editor will not start. The constraints file forbids those distributions
+outright, including when a dependency asks for them.
+
+Open `http://localhost:8003`.
+
+The server listens on this computer only (`127.0.0.1:8003`). The editor has no sign-in,
+so to open it from another device on your network, start it with `set STORYROOM_HOST=0.0.0.0`
+(Windows) or `STORYROOM_HOST=0.0.0.0` (macOS/Linux) and browse to the computer's IP address;
+anyone on that network can then use it. Requests that change anything are refused when they
+come from another website, and the editor answers only at `localhost` or an IP address
+(add names with `STORYROOM_ALLOWED_HOSTS`). It creates a `projects/` directory beside
+`app.py` for local project data.
+
+## Narration and footage flow
+
+After a storyboard is built, `picture_flow.py` runs two passes and stores the result in
+`project.json` and `reviews/Narration_pauses.json`:
+
+1. **Picture flow.** Every beat is checked against the decoded shot index of its own
+   source (`reviews/Full_source_analysis.json`). A beat whose requested interval merely
+   *crosses* a shot change is slid to the nearest moment that holds the whole beat inside
+   one continuous shot; a beat that returns to the take the previous beat was running is
+   joined to it rather than jump-cutting in place.
+2. **Narration flow.** Silences in the uploaded narration are decoded with `ffmpeg
+   silencedetect`, and each picture change may move by at most 0.35 s to land inside a
+   breath. Duration, SRT wording and the narration audio are never altered; a block that
+   ends up straddling a cut is owned by exactly one scene so nothing is spoken twice.
+
+Beats that cannot be placed cleanly are reported, never faked: nothing is trimmed,
+stretched, looped or frozen. The report is available at
+`GET /api/projects/<id>/flow-audit` (JSON, or CSV with `?download=1`) and is summarised in
+the setup panel and the shot inspector. Any in-point you edit by hand overrides the
+automatic conform for that beat. These checks describe continuity and cut placement only;
+they say nothing about who or what a frame shows.
+
+## One file or two
+
+A production script may carry the narration SRT inside it, as a Markdown table with a
+block number, a documentary `IN → OUT` clock and the exact wording. On upload the editor
+recovers those blocks verbatim (`document_plan.srt_outline_blocks`): wording, order and
+timing are copied, never rewritten or retimed, and the recovered SRT is also written to
+`inputs/captions.srt`. The setup panel reports how many blocks were recovered and whether
+anything was refused.
+
+Recovery is structural and shows its work:
+
+- columns are identified by content, so a beat table with source IN/OUT columns is never
+  mistaken for narration;
+- timing must be numbered 1..N in order and contiguous. A table with a gap or overlap is
+  reported and **not** used — nothing is retimed to make it fit;
+- an explicitly uploaded `.srt` always wins. Recovery only fills an empty SRT slot, and
+  uploading a separate `.srt` later replaces the recovered one and clears its note.
+
+A block map is still separate work: it needs a media filename and verified source
+IN/OUT per block, which approximate sampled anchors in a guide cannot supply.
+
+## One editor, any programme
+
+Nothing in the timeline is sized to a particular case, and nothing is weighted per minute.
+One code path, one set of rules, one output shape: a 1-minute piece and a 60-minute piece
+are built, reviewed, rebuilt and rendered by exactly the same functions. Measured on this
+machine, each runtime built to its exact length with no validation errors:
+
+| Runtime | SRT blocks | Beats | Longer runtime | Build | Timeline |
+|---|---|---|---|---|---|
+| 1 min | 11 | 11 | 1 | 124 s | 60.00 s, 0 errors |
+| 5 min | 49 | 49 | 2 | 130 s | 300.00 s, 0 errors |
+| 10 min | 96 | 96 | 4 | 173 s | 600.00 s, 0 errors |
+| 18 min | 176 | 176 | 7 | 224 s | 1080.00 s, 0 errors |
+| 25 min | 249 | 249 | 10 | 240 s | 1500.00 s, 0 errors |
+| 30 min | 291 | 291 | 12 | 300 s | 1800.00 s, 0 errors |
+| 60 min | 593 | 593 | 24 | 454 s | 3600.00 s, 0 errors |
+
+That table is the point of this section: the numbers differ, the behaviour does not. Each
+build produced a contiguous timeline starting at frame 0 and ending on the last SRT block,
+with every scene carrying the block reference the plan gave it. Longer runtimes are slower
+in proportion to the picture, not by a different route.
+
+- **Beats and blocks are independent.** A map may give one row per SRT block, or let one
+  beat span many blocks (the build merges their narration into the beat). Both are read
+  the same way.
+- **Narration is optional.** A programme can be carried by its text alone: the picture is
+  built, approved and exported on the SRT timing, and the master is written without an
+  audio stream. A narration track is still checked against the picture when one is
+  supplied, to 0.25 s.
+- **Cue clocks are read as tools write them.** A one- or two-digit hour field and one to
+  three millisecond digits are both accepted, so a 47-minute programme exported as
+  `0:00:00,000` imports. Nonsense — out of order, empty, zero-length — is still refused.
+- **A plan and a narration must agree on length.** If a block map covers only part of the
+  SRT (a map built for a 10-minute cut dropped onto an 18-minute one), readiness says
+  exactly how far it reaches, how many blocks are unplaced and which is the first, and
+  export readiness refuses with the same numbers. It never leaves the tail of a programme
+  silently unplanned.
+- **Capacity is judged on the plan you are building.** A range rebuild or a scoped
+  feasibility query measures only the beats it is placing, against the footage that
+  exists. If a runtime needs more picture than you hold, the report says by how much and
+  asks for more footage — it does not repeat a shot, loop it, or shorten the narration.
+
+- **Contiguous beats from one file are one continuous take.** Splitting a long take across
+  consecutive beats is the normal way to cut it, so a repeat is only reported when two
+  source intervals genuinely overlap; frame rounding is not treated as reuse.
+- **Profile.** A production starts from any of the profiles in
+  `blueprints/style_profiles.json` (documentary, educational, promotional, travel,
+  interview, investigative, courtroom, memorial). A profile supplies default movement,
+  a motion scale and optional wording hints; it decides nothing about content. Add a
+  profile with your own hints rather than editing the app for one programme.
+- **Wording hints are dictionaries, not a taxonomy.** Subject words only pick a movement
+  family and an emotion label; anything unmatched falls through to neutral defaults.
+
+### Cuts and dissolves
+
+A production starts **clean cuts only**. That is the default because a cut cannot go
+wrong: it needs no handle, no extra source footage, and it never moves a frame.
+
+A short dissolve is available when you ask for it. Set the production's
+`transition_policy` to `allow_dissolves`, then set `transition` on an individual scene;
+the handle defaults to four frames. It is refused, with a reason, when it cannot be
+honest:
+
+- from the last scene (there is nothing to dissolve into),
+- next to another dissolve (adjacent pairs are unsupported — keep the next exit a cut),
+- longer than the picture beat coming in,
+- when the source file has no footage left to borrow the handle from.
+
+Measured on an 11-beat programme: adding a dissolve changed the picture in the blend
+region and left the master at exactly 1800 frames / 00:01:00.00. Switching back to
+`clean_cuts_only` clears the dissolves on every scene and reports how many it cleared,
+rather than leaving a scene claiming a transition the policy forbids.
+
+Asking for a dissolve while the production is still clean-cuts-only is refused with an
+explanation. It used to be silently rewritten to a cut, which looked like success and
+left no way to tell why the dissolve never appeared.
+
+### Export size
+
+The master is not tied to one resolution. `format` picks the aspect and `size` the pixel
+target, per production, changeable at any time. A "1080p" target names the short side, so
+it means what people mean by it:
+
+| Format | 720p | 1080p | 4K |
+|---|---|---|---|
+| Landscape 16:9 | 1280×720 | 1920×1080 | 3840×2160 |
+| Portrait 9:16 | 720×1280 | 1080×1920 | 2160×3840 |
+| Square 1:1 | 720×720 | 1080×1080 | 2160×2160 |
+| Vertical 4:5 | 576×720 | 1080×1350 | 2160×2700 |
+| Cinema 2.39:1 | 1720×720 | 2580×1080 | 5162×2160 |
+
+`"1920x1080"` is also accepted as written. Measured on one 60-second, 11-beat programme:
+exporting the **same cuts** at 1920×1080, 1080×1920, 720×720, 2580×1080 and 3840×2160
+produced 1800 frames every time, with identical in/out points before and after each change
+— the target moves pixels, never a cut, an approval or the duration.
+
+### Rendering a long programme
+
+A 30-minute, 291-beat programme at 1920×1080 on this machine (2 cores), with the per-stage
+breakdown the renderer writes to `projects/<id>/render_timing.json`:
+
+| Stage | Cold render | Warm re-render |
+|---|---|---|
+| Scene segments (291) | 218 s (83%) | 0.7 s (all reused) |
+| Join | 1.2 s | 1.2 s |
+| Mux (narration encoded, picture copied) | 42 s (16%) | 42 s |
+| **Total** | **262 s** | **46 s** |
+
+What made that possible:
+
+- **Finished scene segments are cached** by a hash of everything that defines the picture
+  (`engine.SEGMENT_VERSION`, source signature, in/out, frame count, motion plan, output
+  settings). An edit re-encodes only the beats whose picture actually changed, and changing
+  the export size re-encodes rather than mixing two sizes in one master.
+- **The final mux stream-copies the picture** when captions are off, because the scene
+  pass already encoded it to the final settings. Only the narration is encoded there. The
+  exported frame count is verified against the timeline, so nothing is shortened silently.
+- **The picture encoder is `ultrafast` at a high-quality target** (`-crf 16`) instead of
+  `veryfast -crf 23`. Measured on a 1080p clip: 0.76 s vs 1.36 s per 6-second segment,
+  **1.8× faster**, and closer to the source (SSIM 0.99998 vs 0.99964) at no larger a
+  file — a faster preset spends its bits on fidelity instead of motion-search heuristics.
+- **The join is skipped when there is nothing to blend.** Its only job is handle-backed
+  dissolves; with clean cuts the segments already are the picture timeline, so joining
+  them would write every frame twice for no change in output (42 s of pure copy at this
+  length). The renderer's only transition policy is clean cuts, so that is the normal path.
+
+Encoding the segments in parallel was measured and rejected: each libx264 encode already
+saturates both cores, so two workers gained ~5% — not worth the complexity.
+
+## Visual plan: pictures that match the narration
+
+**Setup → 08 Visual plan** chooses **moving footage** for every line of narration
+(every 2-6 seconds) instead of holding one clip for a whole 30-second beat, and says
+why it chose each picture. Sound bites are copied from the script unchanged.
+
+- **Continuity.** While the narration stays on the same idea -- nobody new is named and
+  no new subject comes up -- the shot on screen keeps running into its next frames, up to
+  the shot change FFmpeg finds in the file, or into the next described shot of the same
+  report. A cut only comes with a new person or a new subject. A guide card whose clip is
+  shorter than its line carries on in that same shot.
+- **Photos only for people, only when named.** When the narration names the victim, a
+  suspect or a family member (mother, father, brother, sister, grandparent ... set as
+  their role in People on screen), their uploaded photo is shown for that line. When
+  there is moving footage of that person, the plan alternates: photo one time, footage
+  of them the next. Anyone else (an official, a reporter) is shown in footage, never as a
+  photo. A photo can stay up while the following line is still about that person ("she
+  knew her ABCs ... her colours"), up to 8 seconds. "X's father Y" shows Y.
+- **No other stills.** Frames are never taken from footage as stills. An editing guide's
+  base pictures (`BASE-C--police--14.jpg`, from `S21` at 1:56.5) become moving base clips:
+  the shot around that second, cut from the downloaded video.
+- **Photo limit** (10, 20 or 35% of the film; 20% by default) caps photos; past it, the
+  plan uses footage of the person, then other matching footage.
+
+What each shot shows comes from: a card editing guide (`### 12. Narration beat` with
+**At**, **Show**, **Preview**, **Source ID**, **Fill**, **Your timing**) uploaded as the
+production script, whose own clip for a card is always used; a `broll_catalog.json` placed
+in the project's own folder, or the bundled `data/broll_catalog.json` (used only when most
+of its source files are present with the same lengths, so a new production never inherits
+it)
+for files of the same name and length; local analysis reports; the script's visual
+directions ("End on ... pre-frame" notes are ignored). A name inside quotes (a shirt or
+banner slogan) does not count as that person being in the picture.
+
+Rules that are never broken: no suspect picture under a victim or family line, no
+suspect footage before the narration names him, no booking photo or mugshot footage
+before the arrest is narrated, no person, speaker or courtroom footage dated after the
+events being told (unless a Fill hint asks for that year), no talking head unless that
+person is named, no frame used twice, no picture change shorter than 1.2 s. When nothing
+matches, the order is: moving base clips of places or police, the script's own window,
+then the best weak option, flagged. A line that still has nothing is marked **Uncovered**
+with the reason, and the plan cannot be applied until it is resolved.
+
+Review every line in the table: its picture, the reason, and a menu of other pictures
+still unused at that point; a choice is kept when the plan is built again. **Use this
+plan** turns the People photos it used into silent hold clips and puts the plan in as
+the production script; then **Review the Beat picture plan** as usual. Your original
+script is kept: planning again always starts from it, and **Restore my original script**
+puts it back. While a plan is applied, the separate name cards (People on screen) are off
+so the same face is not shown twice; tick *Also show name cards with the visual plan* to
+have both. A narration-only film (a guide with no audio breaks) builds without sound
+bites. Code: `visual_plan.py`, `static/visual_plan.js`, tests in `tests/test_visual_plan.py`.
+
+## Footage & Photo Importer (YouTube and any link)
+
+**Setup → 05b Footage & Photo Importer** turns a Markdown sheet of links into the
+project's footage files, with no manual downloading, renaming or importing.
+
+1. Click **Install yt-dlp** once. It is installed into the app's own `.cache/yt-dlp`
+   folder (or use one already installed: `pip install yt-dlp`). **Update yt-dlp** when
+   downloads that used to work start failing; YouTube changes often.
+2. Upload the sheet (`.md`). Each source needs an ID and its YouTube link on the same
+   line or the line below, in any of these forms:
+   `| SRC-01 | Bayou interview | https://www.youtube.com/watch?v=... |`,
+   `- SRC-02: https://youtu.be/...`, or a `## SRC-03` heading with the link under it.
+   If the row gives a filename (`| SRC-02 | Bayou_drone.mp4 | https://... |`), that
+   exact name is used; otherwise SRC-02 becomes S02.mp4.
+3. Downloads start at once (untick *Start downloading as soon as a sheet is uploaded*
+   to review first and click **Download Footages**). Each video is saved under its
+   source: **SRC-01 → S01.mp4**, SRC-02 → S02.mp4. The number is the sheet's own, so
+   SRC-07 is always S07.mp4 even if SRC-05 is missing. YouTube titles are never used as
+   filenames. A Beat script that names `Full source: S07.mp4` finds it directly.
+4. Each finished file is checked and imported exactly like a manual upload (same
+   probe, editing copy, approval note and replace-by-name rules) and records its
+   source ID, link and title. When everything has downloaded, the editor opens
+   **Media uploads** by itself.
+
+What it shows and does
+
+- Per source: ID, YouTube title, status (Waiting, Downloading, Retrying, Completed,
+  Failed, Already in project, Stopped), progress, size, destination file and error.
+  Overall: *12/20 videos downloaded*.
+- Sheet problems are listed, never guessed: a source with no link, a link that is not
+  YouTube, a source ID used twice, a link with no source ID, gaps in the numbering.
+- Two downloads at a time by default (1-4). Up to 1080p by default (720p or best
+  available), H.264/AAC MP4 preferred, video and audio merged with the bundled ffmpeg.
+- Network errors are retried automatically. Private, removed, age-restricted,
+  members-only or blocked videos fail at once with a plain explanation. For "confirm
+  you're not a bot" and age checks, choose a browser under *Use sign-in from* and
+  retry: yt-dlp then uses that browser's YouTube sign-in.
+- **Retry failed** downloads only what failed; completed files are never fetched again.
+  **Stop** ends every download (and its ffmpeg) immediately; **Resume** continues from
+  the partial files. If the editor closes mid-download the rows come back as
+  *Interrupted* with a Resume button.
+- Each video is downloaded once. Two sources with the same link get two files from one
+  download, and a video already in the project from an earlier sheet is copied, not
+  fetched again.
+- **Production script check.** The sheet is compared with the uploaded production
+  script: files the script names that no row provides, rows the script never uses, and
+  any downloaded file shorter than the latest Source OUT the script asks of it. Videos
+  are always downloaded whole from 0:00 (a `&t=` in a link is ignored), so the script's
+  timestamps refer to the file exactly as it is.
+- A file already in the project under that name is not overwritten: the row says
+  *Already in project* with a **Replace** button. A video already downloaded from the
+  same link is recognised and not downloaded again.
+- Downloads run in their own processes and stream straight to disk in
+  `downloads/tmp/` inside the project; nothing is loaded into memory, and a file only
+  becomes footage after it has downloaded completely and passed the check.
+
+Apify (optional): set `STORYROOM_APIFY_TOKEN` and `STORYROOM_APIFY_ACTOR` to make it
+available as a second downloader. Nothing uses Apify unless it is configured. Further
+providers plug into `PROVIDERS` in `footage_downloader.py`.
+For testing, `STORYROOM_YTDLP_CMD` replaces the yt-dlp command (the tests use
+`tests/fixtures/fake_ytdlp.py`, which needs no network).
+
+Downloading and using a video is your decision. The editor records where each file came
+from but does not check whether it may be used or published.
+
+### Photos of people in the sheet
+
+Photos of the victim, suspect and family go in the same sheet as the footage, one row
+each, with the person's name and role:
+
+```
+| Photo | Person            | Role    | Link                                   |
+|-------|-------------------|---------|----------------------------------------|
+| P01   | Maliyah Bass      | Victim  | https://.../maliyah.jpg                |
+| P02   | Sahara Ervin      | Mother  | https://abc13.com/story/...            |
+| P03   | Travion Thompson  | Suspect | https://drive.google.com/file/d/.../view |
+- Brother — Jaylen Bass: https://.../jaylen.webp
+```
+
+* A row is a photo when its ID is `P01`, `P-02`, `PHOTO 3`, `PIC-04`, `IMG05`, when it
+  names an image file (`Mother.jpg`), or when it gives a role and a link that is not a
+  YouTube video. Roles understood: victim, suspect/accused/defendant, mother/mom/mum,
+  father/dad/daddy, brother, sister, son, daughter, grandmother/grandma,
+  grandfather/grandpa, aunt, uncle, cousin, wife, husband, boyfriend, girlfriend,
+  witness, friend.
+* The file is saved as `P01` plus its real type (`P01.jpg`, `P02.png` ...), or exactly
+  as written when the sheet names it. GIF, BMP, TIFF, HEIC and AVIF are converted to
+  JPG. It goes into **Photos** in the media pool.
+* The link can be a photo, a web page that offers a photo for sharing (most news
+  stories), a Google Drive or Dropbox share, or a YouTube video (its thumbnail). A page
+  with no photo fails with a clear message; use "Copy image address" on the photo.
+* The person named on the row is added to the People list with that photo, so it is
+  shown whenever the narration names them. **How your SRT spells the name is found
+  automatically** ("Malia Bass" for Maliyah Bass, "Sahara Irvin" for Sahara Ervin).
+  Two photos of one person: the first in the sheet is shown, the other stays in Photos.
+  A photo under 120 pixels stays in Photos only.
+
+### B-roll and base pictures in the sheet
+
+Locations, streets, CCTV, houses, apartments, police cars, maps and backgrounds go in
+the same sheet, one row each, with what they show:
+
+```
+| ID      | What it shows                          | Window    | Link                                   |
+|---------|----------------------------------------|-----------|----------------------------------------|
+| B01     | Sunset Crossing Apartments exterior    | 0:43-0:52 | https://www.youtube.com/watch?v=...    |
+| B02     | Police cars at Brays Bayou             |           | https://.../police.jpg                 |
+| BASE-01 | Beechnut Street sign                   |           | https://.../sign.png                   |
+| B04     | Beechnut_frame.jpg  Beechnut at night  |           | https://youtu.be/...?t=12              |
+- Drone shot of Brays Bayou: https://youtu.be/...
+```
+
+* A row is b-roll when its ID is `B01`, `BR-02`, `BROLL 3` or `BASE-04`, or when it has
+  no ID but describes a place or thing (street, CCTV, house, apartment, police car,
+  map, drone, vigil ...) and has a link. Without an ID it is named after its description.
+* A video is saved as `B01.mp4` in Footage. With a window (`0:43-0:52`) only that part
+  is downloaded. A picture is saved as `B02.jpg` (its real type) in Photos. A YouTube
+  link with `&t=` and an image filename gives the frame at that second.
+* The description is kept with the file. If the production script names the file, the
+  script's own use stands. Otherwise the visual plan places it: b-roll videos on the
+  lines that mention what they show (SRT spellings like "Beach Nut" still match
+  "Beechnut"); a b-roll that names something specific is saved for the line that names
+  it and never spent as filler; base pictures are used only where no moving footage
+  fits, within the photo limit.
+
+## People on screen (photos when a name is said)
+
+**Setup → 07 People on screen** holds a photo for each person who matters to the case --
+victim, suspect, family. Add them there (name, role, any photo file: JPG, PNG, WebP, HEIC,
+AVIF, GIF ...), or with photo rows in the footage sheet; both fill the same list.
+
+When photos pop up (**Photos pop up**, default: every mention in the first two scenes):
+
+* In the opening -- the first scene, the first two scenes (a scene is the narration
+  between two sound bites) or the first half -- every mention shows the person's photo.
+* After the opening, footage comes first. Where the shot playing is known to show the
+  person (catalogue, guide, local analysis, script directions or sheet descriptions),
+  the footage stays and no photo covers it. Their photo fills in only where no footage
+  of them is playing. The visual plan follows the same rule when it picks the picture.
+* The first time anyone is named, wherever it falls, their photo pops up.
+* Each line in the People list says which it gets: *photo* or *footage of them plays here*.
+
+Checking the right person is on screen:
+
+* Every SRT line that names a person is listed under them, with the name highlighted.
+  Untick a line to keep their photo off it; tick it again to bring it back.
+* How the SRT spells the name ("Malia Bass", "Sahara Irvin") is found automatically when
+  a person is added; **Find SRT spellings** runs it again, and the spellings can be edited.
+* A line matched only on a first name or surname is marked "check it is them".
+* "Maliyah's mother said ..." is about the mother: the mother's photo is shown if a person
+  with the role Mother is in the list, otherwise nothing. Roles are the victim's family by
+  default, so "Thompson's mother" is never the victim's mother: give that person a role
+  that says whose relative they are ("Suspect's mother", "Mother of Travion Thompson").
+  The same holds for father, brother, sister, grandmother, boyfriend, lawyer and so on.
+* "Not this person" phrases (e.g. "Harris County") are never a match. Whenever **your
+narration** says one of their names, their photo is shown **full screen** (fitted whole
+over a blurred copy of itself, with a name and role lower third) **for the whole SRT
+line that names them**, and through the following lines that name them again. Then the
+footage comes back. When one line names two people, the first holds until the second
+name is spoken. Sound bites are never covered: they always play their own footage.
+
+The photo is laid over the picture; the storyboard is not touched. No Beat is split, no
+cut moves, the frame count and narration are unchanged, and switching photos off gives
+back exactly the film that was there before. While a full-screen photo is up, the
+script's on-screen caption for that footage (e.g. a location) is held back. B-roll,
+maps and documents still come from the uploaded footage through the production script.
+
+Options: full screen or a corner card; the whole SRT line or a fixed time after the
+name; name and role on or off; for a card, its position and size.
+
+- **Who is named.** The full name and every alias count, in any letter case. Add the
+  spellings the SRT actually uses as aliases (`Malia`, `Irvin`, `Travi on`). A first
+  name or surname on its own also counts when it is written as a name, is not shared
+  with another person ("Bass" names neither Maliyah nor Octavius Bass), and is not
+  followed by a place word ("Harris County"). Anything else that is not the person goes
+  under *Not this person*.
+- **Never a flash.** A name said only in passing in a line that names someone else
+  ("Malia's father Octavius Bass") gives the line to the other person. A photo that
+  would be up for less than 1.5 s is left out. Both are listed under *Check these*,
+  along with people who are named but have no photo.
+- **Preview and export match.** The monitor shows the same image the export
+  composites, at the same place, so what you check is what renders.
+- **Per person:** show or hide, other spellings, phrases that are not them, and whether
+  a first name or surname on its own counts.
+
+Photos are kept in the project's `people/` folder, never among the footage assets, so a
+portrait can never be placed on the storyboard as footage or counted as a still. You
+confirm who is in each photo and that you may publish it. The editor does not verify
+identity, provenance or rights.
+
+API: `POST /api/projects/<id>/people` (multipart: `name`, `role`, `aliases`, `exclude`,
+`show`, `short_names`, `photo`, and `id` to update), `DELETE /api/projects/<id>/people/<person>`,
+`GET /api/projects/<id>/person-overlays` (every card on the final timeline, with notes),
+`GET /api/projects/<id>/people/<person>/card.png`, and `person_overlay_settings` on
+`PATCH /api/projects/<id>`. Code: `person_overlays.py`, `static/person_overlays.js`,
+tests in `tests/test_person_overlays.py`.
+
+## Photographs and stills
+
+A production is either **moving footage only** (the default) or **moving footage and
+photographs**. Switch it in the setup panel; changing it resets scene approvals and needs a
+rebuild. In the second mode:
+
+- an uploaded JPG/PNG/WebP can cover a beat, laid out either fitted over a blurred copy of
+  itself or cropped to fill the frame (`image_layout`);
+- a block-map row marked `STILL` in its `status` column pulls **one frame** from an
+  uploaded video at that row's stated source time, registers it as its own approved asset,
+  and uses it for the beat.
+
+A still never pretends to move: no imposed pan, zoom, trim or freeze, and the sample strip
+in the cut inspector shows one picture labelled as a still rather than an invented
+middle/last frame. A photograph deliberately held across consecutive beats counts as one
+continuous shot, not as repeated footage; picking the same photograph up again later in the
+cooldown window is still reported. The decoded frame check verifies that a still opens and
+is not black — it still says nothing about who or what it shows.
+
+## Review in bulk: approval and frame QC
+
+- **Approve all ready beats** (`POST /api/projects/<id>/scenes/approve`) reviews every
+  scene with the *same* function export readiness uses, and approves only the ones with
+  no blocking item. Anything that would fail the export a moment later is left
+  unapproved and returned with its reason. `"scope": "all"` is all-or-nothing: if any beat
+  cannot be approved, nothing is approved and the first reason is reported. The
+  attestation flag is required, and a per-scene `approval_record` is written.
+  Editing a scene still resets only that scene's approval.
+- **Frame QC sheet** (`GET /api/projects/<id>/frame-qc?sheet=N&per_sheet=20`) decodes one
+  frame per beat into a contact sheet, each cell stamped with `#scene · SRT blocks ·
+  HH:MM:SS.mmm`, the source filename, and — when the scene's in-point no longer matches
+  the plan — `moved +1.250s` plus an amber bar across the cell. Undecodable beats are
+  drawn as an empty box, listed in the response, never silently skipped. Sheets are
+  cached per project state and renderer version.
+  The sheet is a provenance record: it says where each frame came from and whether the
+  cut moved. It makes no claim about who or what appears in the picture and approves
+  nothing.
+
+## Re-editing without losing review
+
+A storyboard is not finished when it is first built; it is finished after a few rounds of
+"this shot is wrong, that line needs a different picture". Both rounds are cheap now.
+
+- **A rebuild keeps the review you already did.** Every rebuild compares each new beat
+  with the saved one on the fields that decide what the picture is — SRT blocks, in/out
+  frames, source, in-point, transition and its handles, narration, person, category,
+  context-only flag, focus. A beat that matches keeps its approval, stamped
+  `carried_from_rebuild`; a beat that changed comes back unapproved so it is looked at
+  again. Nothing is approved that a person had not approved before. On a 120-beat
+  programme, a full rebuild carried 119 approvals and asked for exactly one review.
+- **Rebuild one range.** `POST /api/projects/<id>/storyboard` with
+  `{"replace": true, "blocks": [40, 41, 42]}` rebuilds just those blocks. Only beats
+  touching those blocks are replaced (a block can belong to several beats, and all of them
+  are replaced together); every other beat keeps its id, timing, approval and notes. The
+  rebuilt beats are shifted so the range starts exactly where it used to, and the request
+  is **refused with a plain reason** — rather than saving a gap — if the new range would
+  change the length of the surrounding timeline. The response carries `rebuild_report`
+  (`scope`, `beats`, `approvals_carried`, `needs_review`, `rounding_frames`). In the editor
+  this is the **Rebuild this block** button on each beat. Measured: **0.4 s per block** on
+  a 240-beat, 30-minute programme — blocks 1, 57, 160 and 240 each rebuilt in place with
+  239 of 240 approvals carried, the other beats unchanged, the timeline contiguous and the
+  duration still exactly 1800.00 s; the rendered master measured 54000 frames / 30:00.00.
+  Re-basing a range onto frame 0 can leave a **1-frame** rounding residue, which is
+  absorbed at the end of the rebuilt range and reported; a larger change is refused.
+- **A block map is required for a range rebuild**, because a script-style plan has no
+  per-block rows to rebuild by.
+
+## When nothing seems to happen
+
+Auto-assembly used to be silent: inputs present, no plan, status `idle`, no message. It is
+now impossible to miss. `automatic_readiness` is computed once and published — to the
+project (`automatic_status.json`) and to every project read as `automatic_readiness` — and
+answers "why is nothing happening" with one of:
+
+| status | meaning | what the studio offers |
+|---|---|---|
+| `blocked` | an input is missing, the map cannot be read, or it names a file that is not uploaded | the missing piece, by name |
+| `needs_plan` | media, SRT and voice are all present but no plan says which picture goes where | block-map template, upload a map, upload a script |
+| `manual` | the timeline was hand-edited; auto-assembly will no longer overwrite it | rebuild deliberately |
+| `paused` | auto-assemble is switched off for this project | — |
+| `ready` | everything is present and a plan exists | assembly runs |
+| `built` | picture beats exist and can be reviewed | — |
+
+The notice names the plan it found and the inputs it still wants, in plain words, in the
+studio. Assembly cannot fail without saying why.
+
+## Planning: shot index, feasibility and the map template
+
+Three aids, all read-only. None of them places a picture for you.
+
+- **Shot index** (`GET /api/projects/<id>/shot-index`) lists every decoded continuous
+  shot per source with its exact IN/OUT, length, frame count and whether it contains
+  black. A shot is a span between detected changes; the list says nothing about who or
+  what appears in it.
+- **Feasibility** (`GET /api/projects/<id>/feasibility`) compares, per source, the
+  seconds the plan demands against the file's own length and its decoded shots. It flags
+  a source that is short, a beat longer than the longest single shot, or a plan that
+  reuses footage to manufacture length. Before a file is decoded it uses only that
+  file's reported duration and says so.
+- **Candidates** (`GET /api/projects/<id>/candidates?length_s=&handle_s=`) offers only
+  shots that can hold a picture of exactly that length, ignoring black spans. When
+  nothing fits, it returns nothing: a gap is reported, never covered with an
+  approximately-right shot.
+- **Map template** (`GET /api/projects/<id>/block-map-template`, `.csv` by default)
+  writes one row per SRT block with every clock, block reference and parent beat filled,
+  and every picture column deliberately blank. A blank row carries a `gap_note`, so an
+  honest half-finished map imports as a list of gaps rather than a silent choice. The
+  shot table shows the matching `HH:MM:SS.mmm` values for the `source_in`/`source_out`
+  columns.
+
+The build also checks that check itself: if the plan asks one file for more picture than
+it holds, export readiness reports it rather than rendering the same shot on repeat.
+
+## Picture plan input tolerance
+
+The block-map reader accepts the ways people actually write timecodes and columns:
+
+- `00:00:05.400` and `00:00:05,400` are the same instant; an unquoted decimal comma no
+  longer splits a CSV cell;
+- the media column may be called `media_file`, `media_filename`, `media`, `file`,
+  `source_file` or `source`, and `source_out_excl` still means the exclusive OUT used by
+  older beat tables;
+- a plan row without a `block` column is read as a beat table instead of a block map.
+
+## Optional SRT block map
+
+In **Production setup → SRT block map**, choose **Create block map** after importing
+an SRT, or **Edit block map** to revise an existing map. Navigate one block at a time,
+choose or type the original source filename, and enter source IN and exclusive OUT as
+`HH:MM:SS.mmm`. Leave a source blank with a gap note if it is not ready. Optional picture
+description and `footage_group` record editorial intent; use the same group only for
+intervals you have established belong to the same shot. Other imported instructions are
+preserved. Save stores the map and resets storyboard approvals; rebuild to apply it.
+The editor does not verify content or automatically choose footage. If the SRT changes
+while a draft is open, saving is refused so the new timing can be reviewed.
+
+
+`srt_block_map.csv` is the only picture plan the editor accepts: one row per caption
+block (`block,start,end,beat,media_file,source_in,source_out`), with an optional parent
+`beat` number that carries the production script's treatment and end transition.
+It must cover SRT blocks 1..N in order and the complete timeline. Upload it on the setup
+panel (or through the alternative upload controls); rebuilding applies it. Removing it
+returns the build to the production script's own beat table. An unsupplied map is not an
+error, and a map never certifies what a shot shows: it supplies explicit source intervals
+only.
+
+## Validate a production package
+
+```sh
+python validate_production_package.py production_script.md captions.srt /path/to/original_named_sources
+```
+
+The third argument may instead be a JSON map of original filename to duration in seconds. This validator checks document structure, timing and source availability. It is **not** face recognition, copyright clearance, or visual proof of what a shot depicts.
+
+## Repository layout
+
+| Path | Purpose |
+|---|---|
+| `app.py` | Flask routes, uploads, project state and render endpoints |
+| `automatic.py` | Automatic source study, storyboard assembly and continuous-master render |
+| `engine.py` | FFmpeg render/concat job |
+| `document_plan.py`, `edl.py`, `production.py`, `conform.py` | Production-script / block-map parsing and source binding |
+| `approval.py`, `reviewed_library.py`, `import_status.py` | Automatic approval and upload-progress helpers |
+| `cut_audit.py`, `validate_production_package.py` | Timing/source checks |
+| `picture_flow.py` | Shot-continuity conform and narration-breath cut easing |
+| `static/` | Editor and studio UI |
+| `templates/` | Single-page editor shell |
+| `blueprints/` | Style profiles, project schema and editorial rules |
+| `projects/.gitkeep` | Empty project-data directory placeholder |
+
+## Media policy
+
+No uploaded MP4s, voiceovers, SRT files, generated renders, thumbnails or case-specific projects are included in this repository. `.gitignore` excludes all user media and generated output. Add your own source files through the editor after cloning.
+
+One-off, case-specific helpers that embed a project ID, local absolute paths, or human frame-review notes are intentionally excluded. The reusable runtime engine, automatic workflow, UI, blueprints and validator are included.
+
+## License
+
+No `LICENSE` file is included. If this is a public repository and you want others to reuse the code, add a license before publishing. Without one, standard copyright applies.
+
+## Honest scope
+
+The engine can decode frames and follow explicit machine-readable source intervals. It does not independently certify people, exact exhibits, copyright status, or editorial truth. `YES` flags and automatic approval do not equal visual identity verification.
+
+## Local media understanding (experimental)
+
+Production setup → **Local audio & video understanding** opens an independent,
+per-file report. Analysis itself does not change the SRT, make editorial approvals,
+or affect storyboard construction. Use **Analyse locally** for narration or an uploaded video.
+The JSON report is also available at `GET /api/projects/<id>/understanding/<target>`
+where target is `narration` or a video asset ID. A completed or partial transcript can
+be downloaded as an SRT from the analysis panel; it does not replace the project's
+authored SRT, and should be reviewed before use. For completed narration transcripts,
+**Use as project SRT** explicitly applies the machine transcript after confirmation.
+It replaces any existing SRT and clears the storyboard and approvals, like an SRT upload;
+a ready automatic build may start. Source timestamps are not padded to cover silence,
+so verify text, timing, and coverage before building or exporting. The shot inspector also shows source
+observations that overlap the saved beat, mapped to its timeline times; these do not
+change the edit. Video audio decoding preserves delayed audio offsets relative to the
+media timeline; reports created before this fix show a warning until a full reanalysis.
+The scene-understanding API also maps word timestamps, anonymous
+speaker turns, scene spans, signal windows and low-energy intervals. Original source
+times remain available alongside the clipped timeline times; word times may be absent. Replacing a source marks its report stale. Processing is serialized to reduce CPU and memory pressure.
+
+Setup on the computer running Storyroom:
+
+1. Install the optional libraries into the app's Python environment:
+   `pip install -r requirements-local-ai.txt`. FFmpeg is supplied by imageio-ffmpeg.
+2. Install the pinned CPU Whisper-small model with
+   `python tools/install_local_whisper.py` (about 484 MB, one-time GitHub download).
+   This can also be done from the app: Processing and storage reports which of the two
+   halves -- the package or the model -- is missing, and installs it on request.
+   The installer verifies SHA-256 hashes and stores it under `.cache/storyroom-models`;
+   Storyroom detects that location automatically. Alternatively download a CTranslate2
+   Faster-Whisper model yourself and set `STORYROOM_WHISPER_MODEL_DIR` to its directory
+   before starting Storyroom. For example, install a converted `Systran/faster-whisper-small`
+   model (the directory must contain `model.bin`, `config.json` and `tokenizer.json`).
+   Storyroom checks for these files to prevent Faster-Whisper's tokenizer download
+   fallback, loads only local files and uses CPU int8; it never downloads a model.
+3. Install and run Ollama locally, and separately download `qwen3-vl:2b` using
+   `ollama pull qwen3-vl:2b`. Storyroom sends sampled frames only to
+   `http://127.0.0.1:11434`. Start the Ollama **server** with `OLLAMA_NO_CLOUD=1`:
+   loopback alone does not prevent Ollama from forwarding to a cloud model. Before
+   each frame Storyroom requires `/api/status` to report cloud disabled and checks
+   `/api/show` for remote model metadata. If these checks fail, no frame is sent.
+   This requires a recent Ollama version that supports `/api/status`.
+   `STORYROOM_OLLAMA_MODEL` can select another vision model already installed locally.
+   A completed or partial video report offers **Analyse video frames only**, preserving
+   the transcript, sound observations and other stages.
+4. To queue analysis on future uploads, start Storyroom with
+   `STORYROOM_UNDERSTANDING_AUTO=1`. By default use the manual control so additional
+   model workloads do not interrupt existing editing. Analysis can take much longer
+   than the media duration on a small CPU; `STORYROOM_VISION_MAX_FRAMES` controls the
+   number of sampled frames (default 60, maximum 300).
+
+The installer uses the MIT-licensed Systran Whisper-small conversion from a pinned
+[GitHub mirror](https://github.com/YankS1/faster-whisper-mirror), with hashes checked
+before installation. The model weights are not committed and cache contents may be
+cleared by the host; rerun the installer if necessary. Model downloads require an
+internet connection once, but analysis is local and requires no paid inference. Ollama and the Faster-Whisper models need extra disk and RAM; the
+Qwen 2B quantized weights alone are approximately 1.9 GB, before runtime memory. This
+sandbox has only 3.8 GiB RAM and two CPU cores, so running this model here may be slow
+or exceed memory. Your own computer's hardware was not assessed. AMD acceleration is
+not configured or verified; the transcription path is explicitly CPU-only.
+
+**Current limits:** this is not yet complete audio/video understanding. The visual
+pass samples still frames across the video, up to the sample cap, so it can miss actions
+and text between frames. Descriptions and timestamps can be wrong; names and identities
+are not established. Librosa reports RMS, spectral centroid and coarse low-energy
+windows and estimated low-energy intervals, not guaranteed silence. Optional YAMNet
+adds estimated music and sound-event labels in three-second windows; scores are not
+proof, and short or overlapping events may be missed.
+Optional pyannote diarization requires a separately installed local pipeline and has not
+been tested here with real models. Its speaker labels are anonymous, per-file estimates,
+not verified identities. The model may require license acceptance and authentication
+for the one-time download; inference itself is local. Missing
+models/dependencies and failures appear per stage, and partial results are labelled as
+such. Whisper-small transcription has been smoke-tested with real project media; accuracy
+still requires editorial review. Visual inference and diarization need real-model
+testing before this capability should be treated as complete. The optional sound classifier was tested
+on a handful of sample files, not benchmarked for real-world accuracy.
+
+### Windows 11: CPU-first setup
+
+These commands run on **your computer**, not the remote preview. In PowerShell, from
+this repository's folder, with Python 3.11 installed:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-local-ai.txt -c requirements-constraints.txt
+.\.venv\Scripts\hf.exe download Systran/faster-whisper-small --local-dir "$HOME\storyroom-models\faster-whisper-small"
+$env:STORYROOM_WHISPER_MODEL_DIR = "$HOME\storyroom-models\faster-whisper-small"
+```
+
+Install the official Windows Ollama application separately and run
+`ollama pull qwen3-vl:2b`. Fully quit any Ollama server already running, then start
+a recent Ollama server in a separate PowerShell window with cloud disabled:
+
+```powershell
+$env:OLLAMA_NO_CLOUD = "1"
+ollama serve
+```
+
+Leave that window running. If the port is already in use, quit the existing Ollama
+instance before starting it again with the setting. Then start Storyroom:
+
+```powershell
+$env:STORYROOM_UNDERSTANDING_AUTO = "1"  # optional: analyse future uploads automatically
+.\.venv\Scripts\python.exe app.py
+```
+
+Model downloads use the internet but analysis does not send media to a hosted service.
+The automatic option queues each upload, and on CPU may compete with the editor for
+resources; leave it unset to choose when to analyse. Start with short test clips.
+
+Optional speaker diarization (experimental): install
+`.\.venv\Scripts\python.exe -m pip install -r requirements-local-diarization.txt`.
+After accepting the community-1 model's terms with its provider and downloading the
+**complete** `pyannote/speaker-diarization-community-1` repository, set
+`$env:STORYROOM_PYANNOTE_MODEL_DIR` to that local directory before starting Storyroom.
+The diarization subprocess forces Hugging Face offline mode and disables pyannote
+telemetry. No credentials are entered into Storyroom. This path is not yet tested here
+with the actual pipeline, especially on Windows, and may require additional dependency
+setup. `SPEAKER_00` labels are anonymous and cannot be compared across files.
+
+Faster-Whisper and diarization run on CPU. Ollama controls its own device selection;
+AMD GPU support depends on the exact GPU, driver and Ollama version. Consult
+[Ollama's hardware support](https://docs.ollama.com/gpu) and use `ollama ps` while a
+model is loaded to see whether it is using GPU. No AMD acceleration has been verified
+in this environment. On an unsupported GPU, Ollama can fall back to CPU.
+
+### Optional local sound-event tagging
+
+Run `python tools/install_local_yamnet.py` to download and SHA-256 verify a 16 MB
+ONNX model from the [amplify-project/Physiological-Signals repository](https://github.com/amplify-project/Physiological-Signals),
+pinned by Git blob `15658631e3ab2705fbf72dc302b9df8a1304a8fa`. That repository is
+licensed AGPL-3.0 and describes the file as YAMNet but does not document its conversion
+provenance; the original YAMNet is attributed to Google's TensorFlow Models. The weights
+are not bundled. The installer stores them in the local `.cache/storyroom-models` and
+Storyroom detects them automatically. Cache contents can be cleared by the host.
+
+Alternatively, set `STORYROOM_YAMNET_MODEL` before starting Storyroom to a compatible
+local graph: float32 waveform `[1, 48000]` with `scores`, or a dynamic one-dimensional
+float32 waveform with `output_0`, each with 521 score classes. For example in PowerShell:
+
+```powershell
+$env:STORYROOM_YAMNET_MODEL = "C:\path\to\yamnet_3s.onnx"
+```
+
+The model is never downloaded during analysis. Only use a model whose
+license permits your use. A completed or partial report can run **Analyse sound events only**
+to add these observations without retranscribing or replacing its other results. Output is an estimated list of sounds and music for each
+three-second window; class scores can be wrong, are not verified probabilities, and do
+not identify a sound's source. Short tails are not classified. The compatibility test
+used the `yamnet_3s.onnx` waveform graph from
+[Choise-ieee/yamnet_onnx_cpp_audio_speech_classification](https://github.com/Choise-ieee/yamnet_onnx_cpp_audio_speech_classification);
+that repository does not state a license, so it is **not redistributed here**. The
+included class labels and their license are documented in `data/YAMNET-NOTICE.md`.
+
+### Documentary sound-bite timeline (review preview)
+
+Choose **Documentary edit** when creating a project. **Sound bites** lets you choose and audition a narration pause and an uploaded video's source IN and exclusive OUT. The separate plan never rewrites the original narration or SRT. Verify the speaker, context and rights yourself.
+
+The documentary timeline displays narration before and after each inserted sound bite, its picture, and shifted SRT reference positions. Ordinary footage is muted; only the selected sound-bite source audio is heard while narration pauses. Each sound bite is measured and level-matched to the narration, with a peak limiter; original audio files are unchanged. Drag the orange audio block to move the handoff (snapped to the 30 fps preview frame grid), then choose **Prepare timeline preview** to rebuild the synchronized review MP4. Until that finishes, playback is blocked rather than falling back to the unedited timeline. Replaced media or changes to the project or plan invalidate the preview. The review preview currently requires assigned videos in all base slots and frame-aligned sound-bite durations, and explicitly asks before retaining a small silent picture tail.
+
+An adjusted SRT can be downloaded separately from the planner. If a pause falls inside a cue, you must listen and choose a word boundary for that cue. This is an editorial choice, not automatic word alignment; cue words remain unchanged and in order. The original SRT remains unchanged.
+
+**This is a low-resolution review preview, not a final documentary export.** The normal review workspace and its export checks remain separate. Final documentary MP4 rendering is not yet implemented; the preview does not constitute editorial approval or rights clearance.
+
+#### Any script, not one script
+
+A Beat storyboard is a reusable editor, not a one-off. It is verified against the
+ranges it recorded when it was built — the fitted `IN`/`OUT` of every Beat, the
+approved gaps and the approved overlaps — not against the current text of the
+production script. That distinction matters:
+
+- The script is an **input**. It can be uploaded again, edited, replaced and edited
+  again. Nothing about an existing timeline becomes invalid because its text moved on.
+- A built timeline is **internally consistent or it is not**: every slot must still
+  match the range the build placed, and every saved bite must still match its own
+  recorded range. Those checks fail closed and name the scene or Beat.
+- A script edited after a build is reported as a **warning that names the Beats that
+  moved** — never as an anonymous failure of scene 1. The timeline keeps playing the
+  picture it was built with, and **Rebuild the Beat timeline** applies the new script.
+
+Nothing in the reader or the planner is tied to one production. `Beat: 001` blocks
+may start or end with a narration or a sound bite; the source may be named by `Video
+File` or `Full Source`, the clock by `Narration Clock` or `VO Clock`, the speaker by
+`Speaker` or `Speaker & Role`. Any number of Beats, any filenames, any narration
+length. A confirmed rebuild replaces the saved timeline and its bites, and restores
+the previous scenes if the rebuild fails, so a failed attempt never leaves the
+project without a timeline.
+
+Any failure the frame audit reports is shown **in the monitor itself**. A schedule
+that cannot be built used to be swallowed, which left a black monitor with the empty
+state hidden and nothing on the page saying why; it now states the reason and marks
+the preview blocked.
+
+
+## Any production, any length
+
+Nothing in the editor is tied to one case or one running time. Names, places and
+roles come from each production's own SRT, script, footage sheet and People list; no
+person or place is built in. A capitalised run that ends in a place or organisation
+word ("Oak Ridge Mall", "Harris County", "Miami Police Department") is treated as a place
+in any city. Every export step is given 30 minutes plus 12 seconds per second of film, so
+an 8-, 10-, 20- or 40-minute production is never stopped for being long. Checked by
+building one made-up production at 8, 10 and 20 minutes: picture length equals
+narration plus sound bites each time, every line is covered, and the photos, b-roll and
+music follow that production's own scenes.
+
+
+## Cuts
+
+Every cut is placed on purpose and lands on its exact frame and sample:
+
+* **Picture.** Each shot starts and ends on the frame its in and out times fall on, and
+  every frame is traced to the exact source frame (checked frame by frame in
+  `tests/test_cut_precision.py`).
+* **Sound.** Narration and sound bites are cut to the sample; narration either side of a
+  bite is the original recording, sample for sample.
+* **Picture and sound together.** A picture cut rounds to the nearest frame, so it is never
+  more than half a frame (17 ms at 30 fps) from the sound cut it belongs to.
+* **Mixed frame rates.** Footage at 25, 29.97, 30, 60 or 24 fps can be used together. The
+  film runs at the rate covering most of its picture; other clips are cut at their own
+  exact source frames and resampled to fill exactly their slot. No cut moves.
+* **Photos and captions** switch on and off on the same frames as the cut, never a frame
+  early or a frame into the next shot. Photos cut in cleanly by default (a dissolve can
+  be set with `fade_ms`), so they cover the whole line, not a faded part of it.
+* **Music** is silent from the first frame of a sound bite to its last.
