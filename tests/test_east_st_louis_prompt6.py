@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 from documentary import build_timeline
-from documentary_beats import apply_overrides, audit_beats, read_beats
+from documentary_beats import apply_overrides, audit_beats, media_preflight, read_beats
 from documentary_beat_plan import proposal
 
 
@@ -203,6 +203,39 @@ Visual Direction: Legacy B-roll
         self.assertEqual(beat['speaker'], '')
         self.assertEqual(beat['audio_file'], 'S11 Marcus May.wav')
         self.assertEqual(beat['picture_file'], 'S03.mp4')
+
+    def test_15_srt_reference_and_structured_preflight_are_exposed(self):
+        script = narration(1, 0, 0, missing=True).replace('Type: Narration (Voice Over)', 'Type: Narration (Voice Over)\nSRT Cue Reference: 17')
+        beat = read_beats(script)[0]
+        self.assertEqual((beat['srt_cue_reference'], beat['srt_blocks']), ('17', [17]))
+        report = media_preflight([beat], {'assets': []}, Path('.'))
+        self.assertEqual(report['missing_pictures'][0]['beat'], '001')
+        self.assertEqual(report['blocking_issues'], [])
+
+    def test_16_illustrative_without_a_file_is_a_specific_build_blocker(self):
+        script = '''Beat: 001
+Type: Narration (Voice Over)
+Picture Status: ILLUSTRATIVE VISUAL REQUIRED
+Image Prompt: Neutral map illustration — not actual case footage
+Narration State: PLAYING
+Footage Audio: MUTED
+Narration Clock: 00:00:00,000 --> 00:00:01,000
+Master Timeline: 00:00:00,000 --> 00:00:01,000
+Visual Direction: Illustration review
+On-screen Caption: None
+'''
+        report = media_preflight(read_beats(script), {'assets': []}, Path('.'))
+        self.assertTrue(any('ILLUSTRATIVE VISUAL REQUIRED' in issue for issue in report['blocking_issues']))
+
+    def test_17_full_233_beat_review_is_compact_when_ranges_repeat(self):
+        # Pairwise duplicate diagnostics would turn these repeated authored ranges
+        # into tens of thousands of strings and make the review endpoint time out.
+        result = proposal({'assets': [], 'voiceover': {'duration': 208}}, read_beats(prompt6_script()))
+        self.assertEqual(len(result['beats']), 233)
+        self.assertLess(len(result['issues']), 300)
+        self.assertTrue(result['exact_duplicate_groups'])
+        self.assertTrue(result['repeated_ranges_truncated'])
+        self.assertLessEqual(len(result['repeated_ranges']), 500)
 
 
 if __name__ == '__main__':

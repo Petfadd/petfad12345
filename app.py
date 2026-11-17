@@ -347,8 +347,13 @@ def _auto_build(pid):
    _auto_note(pid,'waiting','Waiting for: '+', '.join(missing)+'.');return
   try:
    beats=read_beats(script)
-   from documentary_beats import apply_overrides
+   from documentary_beats import apply_overrides,media_preflight
    beats=apply_overrides(beats,p)
+   preflight=media_preflight(beats,p,root)
+   if preflight['blocking_issues']:
+    _auto_note(pid,'waiting',preflight['blocking_issues'][0]);return
+   if preflight['missing_pictures']:
+    _auto_note(pid,'waiting','Review and explicitly approve the MISSING PICTURE placeholders before building.');return
   except ValueError as e:_auto_note(pid,'error','The production script could not be read: '+str(e));return
   fp=_auto_fingerprint(p,root,beats)
   if p.get('scenes') and (p.get('documentary_beat_review') or {}).get('auto_fingerprint')==fp:return
@@ -3631,14 +3636,14 @@ def documentary_beat_proposal(pid):
    beats=read_beats(script)
    from documentary_beat_plan import frame_limits
    data=proposal(p,beats,request.args.get('scripted_review_beat'),request.args.get('scripted_review_source'),frame_limits(folder(pid),p['assets']))
-   from documentary_beats import apply_overrides,audit_beats
-   effective=apply_overrides(beats,p);media_report=audit_beats(effective,p,folder(pid))
-   # A declared MISSING PICTURE is a permitted review placeholder.  Missing WAVs,
+   from documentary_beats import apply_overrides,media_preflight
+   effective=apply_overrides(beats,p);media_report=media_preflight(effective,p,folder(pid))
+   # A declared MISSING PICTURE is a permitted review placeholder. Missing WAVs,
    # B-roll files, ambiguous files and bad local ranges remain hard build blockers.
-   placeholder_notes=[x for x in media_report if 'MISSING PICTURE review placeholder' in x]
-   media_issues=[x for x in media_report if x not in placeholder_notes]
-   data['media_validation']={'issues':media_issues,'missing_picture_notes':placeholder_notes}
-   data['issues']=list(dict.fromkeys(list(data.get('issues') or [])+media_issues))
+   data['media_validation']=media_report
+   data['missing_pictures']=media_report['missing_pictures']
+   data['provisional_sources']=media_report['unresolved_sources']
+   data['issues']=list(dict.fromkeys(list(data.get('issues') or [])+media_report['blocking_issues']))
   except ValueError as e:raise BadRequest(str(e))
   # The client used to send plan_revision:0 for every project. Once a plan holds
   # bites its revision is never 0, so every rebuild was refused as "the plan
@@ -3736,10 +3741,14 @@ def _documentary_beat_build_work(pid, root, data, report):
  from documentary_beat_plan import fit,frame_limits
  report('read',0.5)
  beats=read_beats(script)
- from documentary_beats import apply_overrides,audit_beats
+ from documentary_beats import apply_overrides,media_preflight
  beats=apply_overrides(beats,p)
- media_issues=[x for x in audit_beats(beats,p,root) if 'MISSING PICTURE review placeholder' not in x]
- if media_issues:raise ValueError(' '.join(media_issues))
+ media_report=media_preflight(beats,p,root)
+ if media_report['blocking_issues']:raise ValueError(' '.join(media_report['blocking_issues']))
+ expected_placeholders={str(x['beat']) for x in media_report['missing_pictures']}
+ approved_placeholders=data.get('approved_missing_pictures') or []
+ if expected_placeholders and (not isinstance(approved_placeholders,list) or {str(x) for x in approved_placeholders}!=expected_placeholders):
+  raise ValueError('Review and explicitly approve every MISSING PICTURE placeholder before building. These slots remain review-only and are not completed footage.')
  report('read',1.0)
  # Fitting is mechanical and every change is saved with the storyboard, so the
  # review timeline states exactly which ranges differ from the script.

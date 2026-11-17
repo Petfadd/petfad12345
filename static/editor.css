@@ -1021,3 +1021,11 @@
 .cam-tr{margin-top:8px;padding-top:8px;border-top:1px solid #262c35}.cam-tr strong{color:#eef2f7}
 .person-motion{position:absolute;overflow:hidden;display:none;pointer-events:none;z-index:4}.person-motion.on{display:block}
 .monitor .person-motion img{position:absolute;inset:0;width:100%;height:100%;transform-origin:center center;background:transparent;object-fit:fill}
+
+/* Beat-script source review: provisional and missing pictures must be visible as
+   editorial states, not look like completed clips. */
+.beat-source-row.beat-missing{background:rgba(237,69,96,.12)}
+.beat-source-row.beat-provisional{background:rgba(232,176,75,.08)}
+.beat-status{display:inline-block;padding:3px 6px;border-radius:4px;font-size:10px;font-weight:800;letter-spacing:.04em;color:#101318;background:#9de3b6}
+.beat-status.provisional{background:#f2bc62;color:#342208}
+.beat-status.missing{background:#ee6077;color:#fff}

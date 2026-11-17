@@ -52,10 +52,12 @@ def prepare(project, root, approved_gaps, approved_overlaps, allow_tail, has_aud
     for b in beats:
         # Picture and dialogue are looked up independently.  In particular, an
         # external WAV may not fall back to the B-roll video's original audio.
-        if b.get('picture_status') == 'MISSING PICTURE' or not b.get('source_file'):
+        if b.get('picture_status') == 'MISSING PICTURE':
             placeholder = _missing_picture_asset(project, root, b)
             assets=project['assets'];files['@missing:'+str(b['label'])] = placeholder
             b['_picture_key']='@missing:'+str(b['label'])
+        elif not b.get('source_file'):
+            raise ValueError(f"Beat {b['label']}: required {b.get('picture_status') or 'picture'} source is missing. Only an explicit MISSING PICTURE may use a review placeholder.")
         else:
             matches=[a for a in assets if (a.get('original_name') or a.get('name'))==b['source_file']]
             if len(matches)!=1:raise ValueError(f"Beat {b['label']}: picture source {b['source_file']} is missing or ambiguous.")

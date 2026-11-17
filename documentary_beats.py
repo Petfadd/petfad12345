@@ -289,6 +289,8 @@ def read_beats(text):
             raise ValueError(f'Beat {label}: unsupported beat Type {typ!r}.')
         master = _master_range(fields)
         picture = _picture(fields, label)
+        srt_reference = fields.get('SRT Cue Reference', 'SRT Cue', 'SRT Reference', 'SRT Cues')
+        srt_blocks = [int(x) for x in re.findall(r'\d+', srt_reference)]
         # ``source_*`` is intentionally retained for all existing callers.  It is
         # picture only; sound-bite audio gets its own explicit fields below.
         beat = {
@@ -301,6 +303,7 @@ def read_beats(text):
             'master_out_ms': master[1] if master else None,
             'master_duration_ms': (master[1] - master[0]) if master else None,
             'soundbite_id': fields.get('Soundbite ID', 'Sound Bite ID', 'SB ID'),
+            'srt_cue_reference': srt_reference, 'srt_blocks': srt_blocks,
             'audio_state_segments': fields.get('Audio State Segments', 'Audio States', 'Audio State'),
         }
         try:
@@ -416,6 +419,78 @@ def apply_overrides(beats, project):
 
 def _asset_name(asset):
     return str(asset.get('original_name') or asset.get('name') or '')
+
+
+def media_preflight(beats, project, root):
+    """Structured, fail-closed media report for the Beat build dialog.
+
+    It separates permitted *explicit* MISSING PICTURE review slots from absent
+    required media.  The latter remains a hard blocker, including an illustrative
+    visual that has not yet been supplied: an illustrative label is not a licence to
+    invent a visual.
+    """
+    root = Path(root).resolve(); assets = project.get('assets') or []
+    result = {'missing_pictures': [], 'missing_media': [], 'unresolved_sources': [],
+              'blocking_issues': [], 'placeholder_notes': []}
+    def matches(filename):
+        return [a for a in assets if _asset_name(a) == filename]
+    def missing(beat, role, filename, reason):
+        row = {'beat': beat['label'], 'role': role, 'file': filename or '', 'reason': reason}
+        result['missing_media'].append(row)
+        named = (' '+filename) if filename else ''
+        result['blocking_issues'].append(f"Beat {beat['label']}: {role}{named} {reason}. No substitution was made.")
+    for beat in beats:
+        status = str(beat.get('picture_status') or 'PROVISIONAL VIDEO').upper()
+        picture = str(beat.get('picture_file') or '')
+        if status == 'MISSING PICTURE':
+            row = {'beat': beat['label'], 'status': status, 'prompt': beat.get('image_prompt',''),
+                   'type': beat['kind'], 'duration_ms': beat.get('duration_ms')}
+            result['missing_pictures'].append(row)
+            result['placeholder_notes'].append(f"Beat {beat['label']}: explicit MISSING PICTURE is an approved review placeholder, not completed footage.")
+        elif not picture:
+            reason = ('is marked ILLUSTRATIVE VISUAL REQUIRED but has no uploaded illustration/picture'
+                      if status == 'ILLUSTRATIVE VISUAL REQUIRED' else 'has no required picture source')
+            missing(beat, 'picture source', picture, reason)
+        else:
+            found = matches(picture)
+            if len(found) != 1:
+                missing(beat, 'picture source', picture, 'is missing or ambiguous')
+            else:
+                asset = found[0]; path = (root / asset.get('path','')).resolve()
+                allowed = (root/'sources').resolve() if asset.get('kind') == 'video' else (root/'assets').resolve()
+                if asset.get('kind') not in ('video','image') or not path.is_relative_to(allowed) or not path.is_file():
+                    missing(beat, 'picture source', picture, 'is not an available uploaded picture file')
+                elif asset.get('kind') == 'video':
+                    start, end = beat.get('picture_in_ms'), beat.get('picture_out_ms')
+                    if start is None or end is None or start < 0 or end <= start:
+                        missing(beat, 'picture source range', picture, 'has an invalid IN/OUT range')
+                    elif end > float(asset.get('duration') or 0)*1000 + .001:
+                        missing(beat, 'picture source range', picture, f"ends at {end/1000:.3f}s beyond the uploaded file")
+            if status in ('PROVISIONAL VIDEO', 'ILLUSTRATIVE VISUAL REQUIRED'):
+                result['unresolved_sources'].append({'beat': beat['label'], 'role': 'picture', 'file': picture,
+                                                     'status': status, 'reason': 'Requires visual, identity, context and rights review.'})
+        if beat.get('kind') != 'sound_bite':
+            continue
+        audio = str(beat.get('audio_file') or '')
+        found = matches(audio)
+        if len(found) != 1:
+            missing(beat, 'soundbite audio', audio, 'is missing or ambiguous')
+            continue
+        asset = found[0]; path = (root / asset.get('path','')).resolve()
+        allowed = (root/'audio').resolve() if asset.get('kind') == 'audio' else (root/'sources').resolve()
+        if asset.get('kind') not in ('audio','video') or not path.is_relative_to(allowed) or not path.is_file():
+            missing(beat, 'soundbite audio', audio, 'is not an available uploaded WAV/audio file')
+            continue
+        start, end = beat.get('audio_in_ms'), beat.get('audio_out_ms')
+        range_valid = start is not None and end is not None and start >= 0 and end > start
+        if not range_valid:
+            missing(beat, 'WAV-local range', audio, 'has an invalid IN/OUT range')
+        elif end > float(asset.get('duration') or 0)*1000 + .001:
+            missing(beat, 'WAV-local range', audio, f"ends at {end/1000:.3f}s beyond the uploaded audio")
+        audible = beat.get('audible_dialogue_duration_ms')
+        if not range_valid or not isinstance(audible, int) or audible <= 0 or audible > end-start:
+            missing(beat, 'soundbite duration', audio, 'does not fit WAV-local IN/OUT')
+    return result
 
 
 def audit_beats(beats, project, root):
