@@ -28,15 +28,19 @@ END_SLACK_S = 3.0
 
 
 def narration_clock_s(project):
-    """Length of the narration clock: the file, or the SRT/script end if that is later.
+    """Length of the authored narration clock, within the file/SRT tail tolerance.
 
-    `clock_s` is set by the storyboard build only when the script ends after the file
-    (by at most END_SLACK_S); a new narration upload replaces the record and clears it.
+    A storyboard records ``clock_s`` when an explicit script/SRT endpoint differs
+    slightly from the decoded narration-file duration. The difference can be either
+    direction: a file can end just before a held final subtitle, or it can carry a
+    short silent tail after the final authored word. In both cases the source file is
+    unchanged and the authored clock remains the timeline authority.
     """
     voice = project.get('voiceover') or {}
     duration = float(voice.get('duration') or 0)
     clock = voice.get('clock_s')
-    if isinstance(clock, (int, float)) and not isinstance(clock, bool) and duration < clock <= duration + END_SLACK_S + .001:
+    if (isinstance(clock, (int, float)) and not isinstance(clock, bool)
+            and clock > 0 and abs(duration - float(clock)) <= END_SLACK_S + .001):
         return round(float(clock), 3)
     return duration
 

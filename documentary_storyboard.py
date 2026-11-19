@@ -124,12 +124,19 @@ def prepare(project, root, approved_gaps, approved_overlaps, allow_tail, has_aud
                          f'narration is only {voice_ms/1000:.3f}s long ({(cursor-voice_ms)/1000:.3f}s short). '
                          f'That is more than a held last subtitle: upload the full narration, '
                          f'or correct the final narration clock in the script.')
-    # The SRT/script ends a moment after the audio (a subtitle held past the last
-    # word). Neither file is changed: the narration clock runs to the script end and
-    # the audio is followed by silence for the difference.
-    if cursor>voice_ms+FRAME_MS:project['voiceover']['clock_s']=round(cursor/1000,3)
-    if cursor>voice_ms:voice_ms=cursor
+    # The source file and the authored SRT/script can differ by a short held-subtitle
+    # or silent-tail interval. Neither input is changed. Make the authored endpoint
+    # the timeline clock in *either* direction so a closing sound bite stays at its
+    # declared pause instead of being moved to a container-duration tail.
     script_end_ms=cursor
+    if abs(cursor-voice_ms)<=END_SLACK_S*1000:
+        project['voiceover']['clock_s']=round(cursor/1000,3)
+        voice_ms=cursor
+    elif cursor>voice_ms:
+        # The larger shortfall was rejected above. Keep this branch defensive in case
+        # END_SLACK_S is changed independently of that guard.
+        project['voiceover']['clock_s']=round(cursor/1000,3)
+        voice_ms=cursor
     if cursor<voice_ms:uncovered.append((cursor,voice_ms))
     # An uncovered sliver narrower than one output frame cannot become a picture
     # slot; rounding would give it zero frames. Record it instead of inventing one.
@@ -169,11 +176,11 @@ def prepare(project, root, approved_gaps, approved_overlaps, allow_tail, has_aud
             if b['pause_ms']!=0:raise ValueError(f"Beat {b['label']}: a sound bite before any narration must start at 00:00:00,000.")
         elif previous['kind']=='narration' and b['pause_ms']!=previous['narration_out_ms']:raise ValueError(f"Beat {b['label']}: pause does not match preceding narration.")
         elif previous['kind']=='sound_bite' and b['pause_ms']!=previous['pause_ms']:raise ValueError(f"Beat {b['label']}: consecutive bites must share one pause point.")
-        # The voiceover holds a breath of silence after the script's last line. A
-        # closing bite written at the last line comes in when the narration file
-        # really ends, so none of the voiceover is cut; the silence keeps its picture.
-        if at_end and b['pause_ms']==script_end_ms<voice_ms and voice_ms-script_end_ms<=END_SLACK_S*1000:
-            b=dict(b,pause_ms=voice_ms)
+        # The authored narration clock is the authority for a closing bite. A small
+        # decoded-file tail is commonly silence after the final SRT word; moving just
+        # the last bite to that tail would split an authored consecutive-bite run and
+        # silently rewrite its pause time. ``voice_ms`` was aligned to the script end
+        # above when the difference is within the explicit end-tail tolerance.
         if at_end and b['pause_ms']!=voice_ms:raise ValueError(f"Beat {b['label']}: a closing sound bite must start at the end of the narration ({voice_ms/1000:.3f}s).")
         picture_key=b.get('_picture_key') or b.get('source_file')
         picture=files.get(picture_key)

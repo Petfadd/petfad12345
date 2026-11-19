@@ -5,11 +5,14 @@ identity, rights or the contents of a real person's footage.
 """
 import tempfile
 import unittest
+from fractions import Fraction
 from pathlib import Path
+from unittest.mock import patch
 
-from documentary import build_timeline
+from documentary import build_timeline, narration_clock_s
 from documentary_beats import apply_overrides, audit_beats, media_preflight, read_beats
 from documentary_beat_plan import proposal
+from documentary_storyboard import prepare
 
 
 def tc(ms):
@@ -227,7 +230,39 @@ On-screen Caption: None
         report = media_preflight(read_beats(script), {'assets': []}, Path('.'))
         self.assertTrue(any('ILLUSTRATIVE VISUAL REQUIRED' in issue for issue in report['blocking_issues']))
 
-    def test_17_full_233_beat_review_is_compact_when_ranges_repeat(self):
+    def test_17_closing_bite_keeps_the_authored_pause_before_a_short_file_tail(self):
+        # The original narration file can carry a few silent milliseconds after the
+        # last SRT/script endpoint. A closing bite at that endpoint must not be moved
+        # to the container duration: doing so splits a final consecutive-bite run and
+        # makes the saved plan fail its own frame audit.
+        # Empty WAV field exercises the legacy combined picture/sound source form.
+        closing = bite(2, 1000, 1000, picture='S01.mp4', wav='').replace(
+            'Picture Source IN: 00:00:00,000\nPicture Source OUT: 00:00:01,000',
+            'Picture Source IN: 00:00:01,000\nPicture Source OUT: 00:00:02,000')
+        script = narration(1, 0, 0, source='S01.mp4') + closing
+        beats = read_beats(script)
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / 'sources').mkdir(); (root / 'inputs').mkdir()
+            (root / 'sources' / 'S01.mp4').write_bytes(b'placeholder source')
+            (root / 'inputs' / 'voiceover.mp3').write_bytes(b'placeholder narration')
+            project = {
+                'id': 'closing-tail', 'profile': 'documentary', 'production_script': {'text': script},
+                'voiceover': {'name': 'voiceover.mp3', 'path': 'inputs/voiceover.mp3', 'duration': 1.214},
+                'srt': {'blocks': [{'number': 1, 'start_ms': 0, 'end_ms': 1000, 'text': 'Narration'}]},
+                'assets': [{'id': 'source', 'name': 'S01.mp4', 'original_name': 'S01.mp4',
+                            'kind': 'video', 'path': 'sources/S01.mp4', 'duration': 20,
+                            'revision': 'source-revision'}], 'scenes': [],
+            }
+            with patch('documentary_storyboard.source_rate', return_value=Fraction(30, 1)):
+                staged, plan = prepare(project, root, [], [], False, lambda path: True, beats=beats)
+        self.assertEqual(narration_clock_s(staged), 1.0)
+        self.assertEqual(plan['bites'][0]['pause_s'], 1.0)
+        timeline = build_timeline(staged, plan)
+        self.assertEqual(timeline['segments'][-1]['kind'], 'sound_bite')
+        self.assertEqual(timeline['segments'][-1]['narration_resume_s'], 1.0)
+
+    def test_18_full_233_beat_review_is_compact_when_ranges_repeat(self):
         # Pairwise duplicate diagnostics would turn these repeated authored ranges
         # into tens of thousands of strings and make the review endpoint time out.
         result = proposal({'assets': [], 'voiceover': {'duration': 208}}, read_beats(prompt6_script()))
