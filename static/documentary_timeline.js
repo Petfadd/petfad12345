@@ -322,6 +322,16 @@ function docDesiredTime(part,t){
  const [num,den]=(String(part.source_fps).includes('/')?part.source_fps:part.source_fps+'/1').split('/').map(Number),rate=num/den;
  return part.source_start_frame/rate+Math.max(0,t-part.timeline_in_ms/1000);
 }
+function docIsPlaceholder(part){return part?.placeholder===true||part?.media_type==='image'}
+function docShowPlaceholder(part,asset){
+ if(!asset?.url)return false;
+ docClearStandby();
+ [masterNode,sourceNode,nextSourceNode].forEach(node=>{try{node?.pause();node?.classList.remove('is-active');node?.classList.remove('is-live')}catch{}});
+ imageNode.src=asset.url;imageNode.style.transform='none';imageNode.hidden=false;
+ docPictureAt=part;docDirectEvent=part;docNextEvent=null;docNextToken++;docDirectBusy=false;
+ return true;
+}
+function docHidePlaceholder(){if(!imageNode.hidden)imageNode.hidden=true}
 function docClearStandby(){
  const node=docStandby();docNextToken++;docNextEvent=null;
  node.onloadedmetadata=node.onseeked=node.onloadeddata=node.onerror=null;
@@ -332,7 +342,7 @@ function docResetStandby(){docClearStandby();docPictureAt=null;docDirectEvent=nu
 // Load and seek the upcoming cut on the standby element. Never touches audio.
 function docPremoteNext(t){
  const d=window.docTimelineData;if(!d?.direct)return;
- const next=docNextAt(t);if(!next)return;
+ const next=docNextAt(t);if(!next||docIsPlaceholder(next))return;
  if(docNextEvent&&docNextEvent.timeline_in_ms===next.timeline_in_ms&&docStandby().getAttribute('src'))return;
  const asset=assets().find(a=>a.id===next.asset_id);if(!asset?.url)return;
  // Consecutive events in the same file are already being played through by the
@@ -453,6 +463,8 @@ async function docSwapInto(part,asset,t,playing,d){
 async function docDirectSwitch(t,playing,force){
  const d=window.docTimelineData,part=docDirectAt(t);if(!d?.direct||!part)return;
  const asset=assets().find(a=>a.id===part.asset_id);if(!asset?.url){pauseEditor();toast('Playback stopped: source footage is missing.');return}
+ if(docIsPlaceholder(part)){docShowPlaceholder(part,asset);return}
+ docHidePlaceholder();
  if(!force&&docPromote(t))return;/* Arriving from a seek: any pre-rolled cut was for the old position. */if(force){docNextEvent=null;docNextToken++}
  // The pre-rolled cut is still loading: keep the outgoing picture up for a moment
  // rather than blanking the monitor; the next tick promotes it as soon as it is ready.
@@ -504,6 +516,7 @@ function docScrubTo(t){
  if(d.status!=='ready'||!d.direct)return;
  const part=docDirectAt(t);if(!part)return;
  const asset=assets().find(a=>a.id===part.asset_id);if(!asset?.url)return;
+ if(docIsPlaceholder(part)){docDirectSwitch(t,false,true);return}
  const node=liveNode||masterNode,want=Math.max(0,docDesiredTime(part,t));
  if(node.getAttribute('src')===asset.url){
   docPictureAt=part;
@@ -575,7 +588,8 @@ function docTick(){
  if(t>=d.duration-.005||(d.direct&&narrNode.ended)){pauseEditor();return}
  if(d.direct){
   const part=docDirectAt(t);
-  if(part){
+  if(part&&docIsPlaceholder(part)&&part!==docPictureAt)docDirectSwitch(t,true,true);
+  if(part&&!docIsPlaceholder(part)){
    // Pre-roll the next event well before its cut so the swap is a no-op.
    const next=docNextAt(t);
    if(next&&(next.timeline_in_ms/1000-t)<=DOC_PREROLL_S)docPremoteNext(t);

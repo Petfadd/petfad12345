@@ -27,15 +27,20 @@ def _missing_picture_asset(project, root, beat):
         draw.rectangle((28, 28, 1252, 692), outline='#f4bb54', width=5)
         draw.text((70, 190), 'MISSING PICTURE', fill='#f4bb54')
         draw.text((70, 280), 'Review placeholder — not footage', fill='#ffffff')
+        reason = str(beat.get('picture_review_reason') or '').strip()
         prompt = str(beat.get('image_prompt') or '').strip()
-        if prompt:
-            draw.multiline_text((70, 370), 'Image prompt:\n' + prompt[:500], fill='#d7cbd7', spacing=8)
+        detail = reason or prompt
+        if detail:
+            heading = 'Review reason:' if reason else 'Image prompt:'
+            draw.multiline_text((70, 370), heading + '\n' + detail[:500], fill='#d7cbd7', spacing=8)
         image.save(path, 'PNG')
+    reason = str(beat.get('picture_review_reason') or '').strip()
+    notes = 'MISSING PICTURE — not completed footage.' + (f' Review reason: {reason}' if reason else '')
     asset = {'id': token, 'name': path.name, 'original_name': path.name,
              'path': path.relative_to(root).as_posix(), 'kind': 'image', 'duration': 0,
              'dimensions': [1280, 720], 'source': 'System review placeholder — no footage supplied.',
              'people': [], 'category': 'missing_picture_placeholder', 'verified': False,
-             'rights': 'not_footage', 'notes': 'MISSING PICTURE — not completed footage.',
+             'rights': 'not_footage', 'notes': notes,
              'revision': token, 'storyroom_placeholder': True}
     project.setdefault('assets', []).append(asset)
     return asset
@@ -334,6 +339,7 @@ def prepare(project, root, approved_gaps, approved_overlaps, allow_tail, has_aud
     staged['script_application']={'recognized_instructions':len(beats),'placed_scenes':len(scenes),'issues':[],'mode':'documentary_beat_review','note':'Review storyboard only. On-screen captions, final fade and final export are not implemented.'}
     staged['documentary_beat_review']={'fitted_beats':[{'label':b['label'],'kind':b['kind'],'source_file':b.get('source_file',''),
         'picture_file':b.get('picture_file',''),'picture_status':b.get('picture_status'),'image_prompt':b.get('image_prompt',''),
+        'picture_review_reason':b.get('picture_review_reason',''),
         'source_in_ms':b.get('source_in_ms'),'source_out_ms':b.get('source_out_ms'),
         'audio_file':b.get('audio_file',''),'audio_in_ms':b.get('audio_in_ms'),'audio_out_ms':b.get('audio_out_ms'),
         'audible_dialogue_duration_ms':b.get('audible_dialogue_duration_ms'),'silent_picture_tail_ms':b.get('silent_picture_tail_ms'),
@@ -380,6 +386,18 @@ def verified_source_interval(project, scene, asset):
         record=project.get('documentary_beat_review') or {}
         if not record:return None
         row=scene.get('plan_row') or {};filename=asset.get('original_name') or asset.get('name')
+        # A declared MISSING PICTURE is a labelled review card, not a video interval.
+        # It must be allowed to appear in a review-only schedule, while still being
+        # rejected by final-export readiness.  Match it to the saved Beat record so a
+        # generic image cannot masquerade as a compliant placeholder.
+        if asset.get('storyroom_placeholder'):
+            label=str(row.get('continuity') or '').removeprefix('Documentary beat ')
+            target = str(row.get('script_beat') or label)
+            fitted=next((b for b in (record.get('fitted_beats') or [])
+                         if str(b.get('label'))==target and b.get('picture_status')=='MISSING PICTURE'),None)
+            if row.get('picture_status')!='MISSING PICTURE' or not fitted:
+                return None
+            return 0.0, 0.0
         # A transition overlaps the shot before it onto this slot's first frames; the
         # frames this slot is cut from do not change, so its transition is not checked.
         if row.get('source_file')!=filename:return None

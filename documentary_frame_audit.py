@@ -68,7 +68,12 @@ def audit(project, root, plan):
             interval = verified_source_interval(project, scene, asset)
             if interval is None:
                 raise ValueError(f'Scene {i+1}: source or timeline no longer matches its script or approved gap.')
-            add_part(result, required, root, asset, round(interval[0]*1000), round(interval[1]*1000), f'Scene {i+1}', scene.get('plan_row', {}).get('source_fps'))
+            if asset.get('storyroom_placeholder'):
+                add_placeholder_part(result, asset, scene, f'Scene {i+1}')
+                if not any('MISSING PICTURE placeholders' in x for x in result['warnings']):
+                    result['warnings'].append('MISSING PICTURE placeholders are present in this review-only playback schedule; they are not completed footage or final-delivery media.')
+            else:
+                add_part(result, required, root, asset, round(interval[0]*1000), round(interval[1]*1000), f'Scene {i+1}', scene.get('plan_row', {}).get('source_fps'))
         if not project.get('scenes'):
             raise ValueError('The storyboard is empty.')
         for bite in bites:
@@ -119,6 +124,21 @@ def audit(project, root, plan):
     except (ValueError, KeyError, TypeError, OSError, OverflowError) as exc:
         result['errors'].append(str(exc))
     return result
+
+
+def add_placeholder_part(result, asset, scene, label):
+    """Record a labelled review card without pretending it has source frames."""
+    row = scene.get('plan_row') or {}
+    start, end = row.get('timeline_in_ms'), row.get('timeline_out_ms')
+    if type(start) is not int or type(end) is not int or end <= start:
+        raise ValueError(f'{label}: MISSING PICTURE placeholder has invalid timeline bounds.')
+    result['parts'].append({'label': label, 'source': asset.get('original_name') or asset.get('name'),
+                            'source_start_frame': 0, 'source_end_frame': 0,
+                            'source_fps': '1', 'output_fps': '1', 'source_rate_fps': '1',
+                            'frame_conversion': 'none', 'source_frame_duration_s': 0,
+                            'requested_duration_s': (end-start)/1000,
+                            'duration_deviation_ms': 0.0, 'media_type': 'image',
+                            'placeholder': True, 'review_only': True})
 
 
 def add_part(result, required, root, asset, start_ms, end_ms, label, recorded_fps=None):

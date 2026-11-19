@@ -284,7 +284,12 @@ def narration_gaps(project, beats, frame_limit=None):
         if b['narration_in_ms'] > cursor:
             holes.append((cursor, b['narration_in_ms']))
         cursor = max(cursor, b['narration_out_ms'])
-    voice_ms = round(float((project.get('voiceover') or {}).get('duration') or 0)*1000)
+    # The review plan uses the authored narration clock when a short decoded-file
+    # tail has already been reconciled with the script/SRT.  Otherwise the proposal
+    # would ask for phantom picture over that tail while `prepare` correctly builds
+    # only through the authored endpoint.
+    from documentary import narration_clock_s
+    voice_ms = round(narration_clock_s(project)*1000)
     if voice_ms > cursor:
         holes.append((cursor, voice_ms))
     names = []
@@ -398,6 +403,7 @@ def proposal(project, beats, focus_beat=None, focus_source=None, frame_limit=Non
             'planned_ms': total_ms, 'narration_ms': round(float((project.get('voiceover') or {}).get('duration') or 0)*1000),
             'source_files': sorted({b['source_file'] for b in adjusted if b.get('source_file')}),
             'missing_pictures': [{'beat': b['label'], 'prompt': b.get('image_prompt',''),
+                                  'review_reason': b.get('picture_review_reason',''),
                                   'status': b.get('picture_status')} for b in missing],
             'provisional_sources': [{'beat': b['label'], 'picture_file': b.get('picture_file',''),
                                     'status': b.get('picture_status')} for b in provisional]}

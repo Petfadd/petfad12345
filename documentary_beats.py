@@ -412,15 +412,34 @@ def apply_overrides(beats, project):
         entry = saved.get(str(beat.get('label'))) or saved.get(str(beat.get('number'))) or {}
         picture = entry.get('picture') if isinstance(entry, dict) else None
         audio = entry.get('audio') if isinstance(entry, dict) else None
-        if isinstance(picture, dict) and picture.get('file'):
-            beat['picture_file'] = beat['source_file'] = str(picture['file'])
-            if picture.get('in_ms') is not None:
-                beat['picture_in_ms'] = beat['source_in_ms'] = int(picture['in_ms'])
-            if picture.get('out_ms') is not None:
-                beat['picture_out_ms'] = beat['source_out_ms'] = int(picture['out_ms'])
-            beat['picture_status'] = str(picture.get('status') or 'PROVISIONAL VIDEO').upper()
-            beat['missing_picture'] = False
-            beat['picture_replaced'] = True
+        if isinstance(picture, dict):
+            picture_status = str(picture.get('status') or 'PROVISIONAL VIDEO').upper()
+            # A visual review can explicitly reject an authored picture without
+            # mutating the production script or borrowing a different clip.  Keep
+            # the decision in the independent picture override; audio keys are not
+            # touched, so a sound bite keeps its specified dialogue source.
+            if picture_status == 'MISSING PICTURE':
+                beat['picture_file'] = beat['source_file'] = ''
+                beat['picture_in_ms'] = beat['source_in_ms'] = None
+                beat['picture_out_ms'] = beat['source_out_ms'] = None
+                beat['picture_status'] = 'MISSING PICTURE'
+                beat['missing_picture'] = True
+                reason = str(picture.get('review_reason') or '').strip()
+                if reason:
+                    beat['picture_review_reason'] = reason
+                beat['picture_replaced'] = True
+            elif picture.get('file'):
+                beat['picture_file'] = beat['source_file'] = str(picture['file'])
+                if picture.get('in_ms') is not None:
+                    beat['picture_in_ms'] = beat['source_in_ms'] = int(picture['in_ms'])
+                if picture.get('out_ms') is not None:
+                    beat['picture_out_ms'] = beat['source_out_ms'] = int(picture['out_ms'])
+                beat['picture_status'] = picture_status
+                beat['missing_picture'] = False
+                reason = str(picture.get('review_reason') or '').strip()
+                if reason:
+                    beat['picture_review_reason'] = reason
+                beat['picture_replaced'] = True
         if isinstance(audio, dict) and audio.get('file'):
             beat['audio_file'] = str(audio['file'])
             if audio.get('in_ms') is not None:
@@ -459,9 +478,12 @@ def media_preflight(beats, project, root):
         picture = str(beat.get('picture_file') or '')
         if status == 'MISSING PICTURE':
             row = {'beat': beat['label'], 'status': status, 'prompt': beat.get('image_prompt',''),
-                   'type': beat['kind'], 'duration_ms': beat.get('duration_ms')}
+                   'review_reason': beat.get('picture_review_reason',''), 'type': beat['kind'],
+                   'duration_ms': beat.get('duration_ms')}
             result['missing_pictures'].append(row)
-            result['placeholder_notes'].append(f"Beat {beat['label']}: explicit MISSING PICTURE is an approved review placeholder, not completed footage.")
+            reason = str(row['review_reason']).strip().rstrip('.')
+            suffix = (' — ' + reason) if reason else ''
+            result['placeholder_notes'].append(f"Beat {beat['label']}: explicit MISSING PICTURE is an approved review placeholder, not completed footage{suffix}.")
         elif not picture:
             reason = ('is marked ILLUSTRATIVE VISUAL REQUIRED but has no uploaded illustration/picture'
                       if status == 'ILLUSTRATIVE VISUAL REQUIRED' else 'has no required picture source')

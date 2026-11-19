@@ -12,7 +12,7 @@ from unittest.mock import patch
 from documentary import build_timeline, narration_clock_s
 from documentary_beats import apply_overrides, audit_beats, media_preflight, read_beats
 from documentary_beat_plan import proposal
-from documentary_storyboard import prepare
+from documentary_storyboard import prepare, verified_source_interval
 
 
 def tc(ms):
@@ -159,6 +159,15 @@ Visual Direction: Legacy B-roll
         self.assertEqual(beat['audio_file'], 'S11 Marcus May.wav')
         self.assertEqual(beat['duration_ms'], 1000)
 
+    def test_07b_missing_picture_review_card_has_a_verifiable_schedule_slot(self):
+        project = {'documentary_beat_review': {'fitted_beats': [
+            {'label': '001', 'picture_status': 'MISSING PICTURE'}
+        ]}}
+        scene = {'plan_row': {'continuity': 'Documentary beat 001', 'script_beat': '001',
+                              'picture_status': 'MISSING PICTURE'}}
+        asset = {'id': 'missing-picture-0001', 'storyroom_placeholder': True}
+        self.assertEqual(verified_source_interval(project, scene, asset), (0.0, 0.0))
+
     def test_08_wav_local_ranges_are_checked_against_audio_upload(self):
         beat = read_beats(bite(1, 0, 0))[0]
         with tempfile.TemporaryDirectory() as temp:
@@ -193,6 +202,16 @@ Visual Direction: Legacy B-roll
         changed = apply_overrides([original], {'documentary_beat_overrides': {'001': {'audio': {'file': 'S11 replacement.wav', 'in_ms': 0, 'out_ms': 1000}}}})[0]
         self.assertEqual(changed['audio_file'], 'S11 replacement.wav')
         self.assertEqual(changed['picture_file'], 'S03.mp4')
+
+    def test_12b_picture_review_rejection_keeps_soundbite_audio(self):
+        original = read_beats(bite(1, 0, 0))[0]
+        changed = apply_overrides([original], {'documentary_beat_overrides': {'001': {'picture': {
+            'status': 'MISSING PICTURE', 'review_reason': 'The supplied clip is an anchor shot, not the named speaker.'
+        }}}})[0]
+        self.assertEqual(changed['picture_status'], 'MISSING PICTURE')
+        self.assertEqual(changed['source_file'], '')
+        self.assertEqual(changed['picture_review_reason'], 'The supplied clip is an anchor shot, not the named speaker.')
+        self.assertEqual(changed['audio_file'], 'S11 Marcus May.wav')
 
     def test_13_provisional_and_missing_picture_warnings_are_exposed(self):
         beats = read_beats(narration(1, 0, 0, missing=True) + narration(2, 1000, 1000))
@@ -261,6 +280,11 @@ On-screen Caption: None
         timeline = build_timeline(staged, plan)
         self.assertEqual(timeline['segments'][-1]['kind'], 'sound_bite')
         self.assertEqual(timeline['segments'][-1]['narration_resume_s'], 1.0)
+
+    def test_17b_proposal_does_not_invent_a_gap_for_an_authored_short_tail(self):
+        beats = read_beats(narration(1, 0, 0, source='S01.mp4'))
+        result = proposal({'voiceover': {'duration': 1.214, 'clock_s': 1.0}, 'assets': []}, beats)
+        self.assertEqual(result['narration_gaps'], [])
 
     def test_18_full_233_beat_review_is_compact_when_ranges_repeat(self):
         # Pairwise duplicate diagnostics would turn these repeated authored ranges

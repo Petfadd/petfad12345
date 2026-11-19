@@ -359,6 +359,14 @@ def _auto_build(pid):
    if preflight['blocking_issues']:
     _auto_note(pid,'waiting',preflight['blocking_issues'][0]);return
    if preflight['missing_pictures']:
+    expected={str(row['beat']) for row in preflight['missing_pictures']}
+    review=p.get('documentary_beat_review') or {}
+    approved={str(label) for label in (review.get('approved_missing_pictures') or [])}
+    # A manually confirmed review build can intentionally contain these cards. Do
+    # not immediately overwrite its successful "built" status with a stale waiting
+    # message; a newly added/rejected placeholder still requires fresh confirmation.
+    if p.get('scenes') and approved==expected:
+     return
     _auto_note(pid,'waiting','Review and explicitly approve the MISSING PICTURE placeholders before building.');return
   except ValueError as e:_auto_note(pid,'error','The production script could not be read: '+str(e));return
   fp=_auto_fingerprint(p,root,beats)
@@ -3607,17 +3615,31 @@ def documentary_music_file(pid):
   return send_file(music_path(root),conditional=True,as_attachment=request.args.get('download')=='1')
 
 def _set_documentary_beat_source(pid, label, role, data):
- """Save one independent Beat source override without editing the production script."""
+ """Save one independent Beat source override without editing the production script.
+
+ A picture review can also explicitly set ``MISSING PICTURE`` with no file.  This
+ preserves the authored source in the script, keeps any sound-bite audio independent,
+ and makes an honest review placeholder rather than silently substituting footage.
+ """
  if role not in ('picture','audio'):raise BadRequest('Unknown Beat source role.')
  if not isinstance(data,dict):raise BadRequest('Provide a JSON source selection.')
- filename=str(data.get('file') or '').strip()
- if not filename or Path(filename).name!=filename:raise BadRequest('Choose an exact uploaded filename.')
  p=load(pid);script=(p.get('production_script') or {}).get('text','')
  from documentary_beats import read_beats
  try:beats=read_beats(script)
  except ValueError as e:raise BadRequest(str(e))
  beat=next((b for b in beats if str(b.get('label'))==str(label)),None)
  if not beat:raise NotFound('Beat not found in the current production script.')
+ status=str(data.get('status') or '').upper().strip()
+ filename=str(data.get('file') or '').strip()
+ if role=='picture' and status=='MISSING PICTURE':
+  if filename:raise BadRequest('MISSING PICTURE is a review placeholder and must not name replacement footage.')
+  reason=str(data.get('review_reason') or '').strip()
+  if len(reason)>1000:raise BadRequest('review_reason must be 1,000 characters or fewer.')
+  entry={'status':'MISSING PICTURE',**({'review_reason':reason} if reason else {})}
+  overrides=p.setdefault('documentary_beat_overrides',{});record=overrides.setdefault(str(beat['label']),{});record[role]=entry
+  save(p)
+  return public(load(pid))
+ if not filename or Path(filename).name!=filename:raise BadRequest('Choose an exact uploaded filename.')
  asset=next((a for a in p.get('assets',[]) if (a.get('original_name') or a.get('name'))==filename),None)
  if not asset:raise BadRequest('That uploaded file is not available in this production.')
  allowed=('video','image') if role=='picture' else ('audio','video')
@@ -3633,7 +3655,9 @@ def _set_documentary_beat_source(pid, label, role, data):
    default_end=beat.get('picture_out_ms') or (start+int(beat.get('duration_ms') or beat.get('master_duration_ms') or 0))
    end=value('out_ms',default_end)
    if start<0 or end<=start or end>round(float(asset.get('duration') or 0)*1000):raise BadRequest('Picture replacement IN/OUT must be inside the selected video. Choose a source range at least as long as this Beat.')
-  entry={'file':filename,'in_ms':start,'out_ms':end,'status':str(data.get('status') or ('UPLOADED PHOTO' if asset.get('kind')=='image' else 'PROVISIONAL VIDEO')).upper()}
+  reason=str(data.get('review_reason') or '').strip()
+  if len(reason)>1000:raise BadRequest('review_reason must be 1,000 characters or fewer.')
+  entry={'file':filename,'in_ms':start,'out_ms':end,'status':status or ('UPLOADED PHOTO' if asset.get('kind')=='image' else 'PROVISIONAL VIDEO'),**({'review_reason':reason} if reason else {})}
  else:
   start=value('in_ms',beat.get('audio_in_ms') or 0);end=value('out_ms',beat.get('audio_out_ms') or 0)
   if start<0 or end<=start or end>round(float(asset.get('duration') or 0)*1000):raise BadRequest('Soundbite WAV-local IN/OUT must be inside the selected audio file.')
@@ -3788,7 +3812,7 @@ def _documentary_beat_build_work(pid, root, data, report):
  beats,adjustments,issues=fit(beats,p['assets'],data.get('scripted_review_beat'),data.get('scripted_review_source'),frame_limits(root,p['assets']))
  if issues:raise ValueError(' '.join(issues))
  report('fit',1.0)
- fitted={b['label']:{'source_file':b['source_file'],'source_in_ms':b['source_in_ms'],'source_out_ms':b['source_out_ms']} for b in beats}
+ fitted={b['label']:{'source_file':b.get('source_file',''),'source_in_ms':b.get('source_in_ms'),'source_out_ms':b.get('source_out_ms')} for b in beats}
  # A confirmed replacement starts from an empty picture plan. `prepare` refuses to
  # overwrite an existing storyboard on its own, which is right for an accidental
  # build and wrong here: the user has just confirmed this exact replacement, and
@@ -3807,6 +3831,10 @@ def _documentary_beat_build_work(pid, root, data, report):
    if previous['review'] is not None:p['documentary_beat_review']=previous['review']
   raise
  staged['documentary_beat_adjustments']=list(adjustments)+list(staged.get('documentary_beat_adjustments') or [])
+ # Persist the exact placeholder acknowledgement with the review storyboard. This
+ # prevents the automatic builder from relabelling a completed, review-only build as
+ # waiting, while any newly rejected picture still demands a new confirmation.
+ staged['documentary_beat_review']['approved_missing_pictures']=sorted(expected_placeholders)
  _reapply_transition_choice(staged)
  _carry_cinematic(previous.get('scenes') or [],staged.get('scenes') or [])
  report('prepare',1.0)
