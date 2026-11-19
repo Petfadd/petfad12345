@@ -4052,6 +4052,11 @@ def documentary_beat_playback_schedule(pid):
      notes=[stale_script_message(p,record,text)]
    except (ValueError,OSError,KeyError,TypeError):
     notes=[]
+  # Cached schedules skip the frame audit, but a review card must remain visibly
+  # labelled as incomplete even after a server restart.
+  if any(event.get('placeholder') for event in events):
+   note='MISSING PICTURE placeholders are present in this review-only playback schedule; they are not completed footage or final-delivery media.'
+   if note not in notes:notes.append(note)
   return jsonify({'project_version':p.get('updated'),'plan_revision':plan['revision'],'events':events,'warnings':notes})
  except (ValueError,OSError,KeyError,TypeError) as e:raise BadRequest(str(e))
 
