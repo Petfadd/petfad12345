@@ -20,6 +20,21 @@ _IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp'}
 _VIDEO_EXTENSIONS = {'.mp4', '.mov'}
 
 
+def has_structured_beat_blocks(text):
+    """Whether text opts into the portable labelled Beat-script format.
+
+    This is deliberately only a lightweight format signal. ``read_beats`` remains
+    the fail-closed validator, so a script with malformed, duplicate or out-of-order
+    blocks is never treated as ready merely because it has a Beat heading.
+    """
+    return bool(HEAD.search(str(text or '')))
+
+
+def structured_beat_block_count(text):
+    """Count authored Beat headings for UI guidance without approving them."""
+    return len(HEAD.findall(str(text or '')))
+
+
 def time_ms(value):
     """Read an authored HH:MM:SS,mmm timecode without rounding it to frames."""
     if not re.fullmatch(CLOCK, str(value).strip()):

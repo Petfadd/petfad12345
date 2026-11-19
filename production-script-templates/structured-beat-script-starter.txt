@@ -1,0 +1,70 @@
+# Structured Beat Script Starter
+#
+# Reusable for any documentary project. Replace every bracketed value with that
+# production's own files, clocks, source ranges, captions and visual direction.
+# Do not upload this starter unchanged: placeholders are intentionally invalid until
+# you supply real production facts.
+#
+# Rules
+# - Number Beats sequentially: 001, 002, 003 … with no fixed maximum.
+# - Keep the original SRT wording, cue references and narration-clock values.
+# - Give every picture source an exact uploaded filename and explicit IN/OUT.
+# - A sound bite may use one picture file and a different external WAV/audio file.
+# - MISSING PICTURE is an explicit labelled review placeholder, never substitute
+#   another person's footage.
+# - Use JPG, JPEG or PNG only for an uploaded still that is approved for a static hold.
+# - Master Timeline is the finished-program clock; Narration Clock stays the original
+#   narration/SRT clock. Do not offset original narration cues for a cold open.
+#
+# Replace this sample Beat with as many narration and sound-bite Beats as your story
+# needs. Delete the alternative fields that do not apply before importing.
+
+Beat: 001
+Type: Narration (Voice Over)
+SRT Cue Reference: [original cue number]
+Picture File: [exact-uploaded-picture-file.mp4]
+Picture Status: PROVISIONAL VIDEO
+Picture Source IN: 00:00:00,000
+Picture Source OUT: 00:00:00,000
+Narration State: PLAYING
+Footage Audio: MUTED
+Narration Clock: 00:00:00,000 --> 00:00:00,000
+Master Timeline: 00:00:00,000 --> 00:00:00,000
+Visual Direction: [What this picture shows and what it must not imply]
+On-screen Caption: None
+
+# Sound-bite example. Keep picture and audio source fields independent.
+#
+# Beat: 002
+# Type: Documentary Sound Bite
+# Soundbite ID: [your reusable soundbite identifier]
+# SRT Cue Reference: [original cue number or cue range]
+# Picture File: [exact-uploaded-b-roll.mp4]
+# Picture Status: PROVISIONAL VIDEO
+# Picture Source IN: 00:00:00,000
+# Picture Source OUT: 00:00:00,000
+# Soundbite Audio File: [exact-uploaded-dialogue.wav]
+# WAV-local IN: 00:00:00,000
+# WAV-local OUT: 00:00:00,000
+# Audible Dialogue Duration: 00:00:00,000
+# Audio State Segments: dialogue; muted picture handle if any
+# Narration State: PAUSED (Suspended at 00:00:00,000)
+# Footage Audio: UNMUTED
+# Duration: 00:00:00,000
+# Master Timeline: 00:00:00,000 --> 00:00:00,000
+# Visual Direction: [Describe the actual B-roll independently of the speaker]
+# On-screen Caption: None
+
+# Explicit missing-picture review slot example:
+#
+# Beat: 003
+# Type: Narration (Voice Over)
+# SRT Cue Reference: [original cue number]
+# Picture Status: MISSING PICTURE
+# Image Prompt: [Clearly label an illustrative concept; it is not actual case footage]
+# Narration State: PLAYING
+# Footage Audio: MUTED
+# Narration Clock: 00:00:00,000 --> 00:00:00,000
+# Master Timeline: 00:00:00,000 --> 00:00:00,000
+# Visual Direction: MISSING PICTURE — review placeholder only
+# On-screen Caption: None

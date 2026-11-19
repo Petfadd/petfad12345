@@ -924,6 +924,17 @@ length. A confirmed rebuild replaces the saved timeline and its bites, and resto
 the previous scenes if the rebuild fails, so a failed attempt never leaves the
 project without a timeline.
 
+### Reusable structured Beat-script starter
+
+When creating a **Documentary edit**, select **Structured Beat script** as the
+starting workflow to make that option visible in Setup. It is guidance, not a format
+lock: the established script/shot-plan formats remain available, and an existing
+project can import a Beat script later. Setup also offers **Download Beat starter**;
+it downloads a production-agnostic scaffold from
+`/api/structured-beat-script-template`. Replace every bracketed value with that
+project's own filenames, clocks, source ranges and editorial directions before
+uploading it. The starter carries no case names, fixed Beat count, people or media.
+
 Any failure the frame audit reports is shown **in the monitor itself**. A schedule
 that cannot be built used to be swallowed, which left a black monitor with the empty
 state hidden and nothing on the page saying why; it now states the reason and marks

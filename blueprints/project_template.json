@@ -1,6 +1,7 @@
 {
   "id": null,
   "schema_version": 1,
+  "script_workflow": "standard",
   "title": "",
   "profile": "investigative",
   "format": "landscape",

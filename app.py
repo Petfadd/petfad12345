@@ -41,6 +41,12 @@ def _schedule_to_disk(pid,key,events):
   pass
 from document_plan import synchronize
 PROJECTS=BASE/'projects';PROJECTS.mkdir(exist_ok=True)
+# A project can keep its established shot-plan workflow or opt into the portable
+# labelled Beat-script workflow. This is guidance metadata, not a lock: existing
+# projects and existing script formats remain readable, and the uploaded text is the
+# source of truth for what the parser actually recognizes.
+SCRIPT_WORKFLOWS={'standard','structured_beat'}
+STRUCTURED_BEAT_TEMPLATE=BASE/'production-script-templates'/'structured-beat-script-starter.txt'
 MAX_VIDEO_BYTES=8*1024**3
 app=Flask(__name__);app.config['TEMPLATES_AUTO_RELOAD']=True;app.config['MAX_CONTENT_LENGTH']=MAX_VIDEO_BYTES
 LOCKS=defaultdict(threading.RLock);THUMBNAIL_SLOTS=threading.BoundedSemaphore(2);JOBS={};FFMPEG=imageio_ffmpeg.get_ffmpeg_exe()
@@ -770,8 +776,32 @@ def _script_reading_uncached(p, include_shots=False):
    result[key]=section[1].strip() if section else ''
  return result
 
+def script_workflow_info(project):
+ """Describe the current script input without tying it to a case or production.
+
+ The saved preference lets a new project advertise the right starter material, while
+ detection is based only on its uploaded text. A standard-script project may therefore
+ import a structured Beat script later (and vice versa) without losing any existing
+ workflow or rewriting its source document.
+ """
+ selected=project.get('script_workflow')
+ if selected not in SCRIPT_WORKFLOWS:selected='standard'
+ text=(project.get('production_script') or {}).get('text') or ''
+ if not text:
+  return {'selected':selected,'detected':'none','label':'No source script yet',
+          'detail':'Upload either an existing supported script format or a structured Beat script.'}
+ from documentary_beats import has_structured_beat_blocks,structured_beat_block_count
+ if has_structured_beat_blocks(text):
+  count=structured_beat_block_count(text)
+  return {'selected':selected,'detected':'structured_beat','label':'Structured Beat script',
+          'beat_blocks':count,'detail':f'{count} labelled Beat block(s) detected. Any sequential Beat count and exact uploaded filenames are supported.'}
+ return {'selected':selected,'detected':'standard','label':'Standard source script',
+         'detail':'Existing Storyroom script and shot-plan formats remain available. You can replace this input with a structured Beat script at any time.'}
+
+
 def public(p):
  d=copy.deepcopy(p)
+ d['script_workflow_info']=script_workflow_info(p)
  from caption_layout import caption_phrases
  d['caption_phrases']=caption_phrases((p.get('srt') or {}).get('blocks',[]))
  from document_plan import match_report
@@ -1123,6 +1153,9 @@ def create():
  if not title or len(title)>100:raise BadRequest('Enter a production title of 1–100 characters.')
  mode=d.get('edit_mode','review')
  if mode not in ('review','documentary'):raise BadRequest('Choose either script review or documentary edit.')
+ workflow=d.get('script_workflow') or 'standard'
+ if workflow not in SCRIPT_WORKFLOWS:raise BadRequest('Choose a supported source-script workflow.')
+ if workflow=='structured_beat' and mode!='documentary':raise BadRequest('Structured Beat scripts use the documentary workspace. Choose Documentary edit or use the standard script workflow.')
  profile=d.get('profile') or 'documentary';fmt=d.get('format','landscape')
  if profile not in PROFILES or fmt not in ASPECTS:raise BadRequest('Choose a supported profile and format.')
  requested_size=d.get('size') or DEFAULT_SIZE.get(fmt)
@@ -1132,7 +1165,7 @@ def create():
  for name in ['inputs','inputs/semantic','sources','assets','renders','reviews']: (root/name).mkdir(parents=True,exist_ok=True)
  requested=d.get('picture_policy')
  if requested is not None and requested not in POLICIES:raise BadRequest('Choose a picture policy: '+', '.join(POLICIES))
- p={'id':pid,'schema_version':1,'edit_mode':mode,'picture_policy':requested or 'clips_only','transition_policy':'clean_cuts_only','repetition_policy':{'cooldown_slots':6,'source_interval_overlap_forbidden_within_window':True},'auto_assemble_uploads':True,'title':title,'profile':profile,'format':fmt,'size':requested_size,'brief':str(d.get('brief','')),'people':[],'assets':[],'scenes':[],'voiceover':None,'srt':None,'updated':time.time()}
+ p={'id':pid,'schema_version':1,'edit_mode':mode,'script_workflow':workflow,'picture_policy':requested or 'clips_only','transition_policy':'clean_cuts_only','repetition_policy':{'cooldown_slots':6,'source_interval_overlap_forbidden_within_window':True},'auto_assemble_uploads':True,'title':title,'profile':profile,'format':fmt,'size':requested_size,'brief':str(d.get('brief','')),'people':[],'assets':[],'scenes':[],'voiceover':None,'srt':None,'updated':time.time()}
  from approval import ensure_automatic_policy
  ensure_automatic_policy(p)
  write(root/'project.json',p);write(root/'catalog.json',{'slots':{}});return jsonify(public(p)),201
@@ -4563,6 +4596,14 @@ def block_map_editor(pid):
    raise BadRequest('The SRT changed since this map was imported. Review and re-upload a matching map, or remove it before starting a new one.')
   rows=existing['beats']
  return jsonify(rows=rows,srt_signature=srt_signature(p),existing=bool(existing))
+
+@app.get('/api/structured-beat-script-template')
+def structured_beat_script_template():
+ """Download a blank, production-agnostic structured Beat-script starter."""
+ if not STRUCTURED_BEAT_TEMPLATE.is_file():
+  raise NotFound('The structured Beat-script starter is unavailable.')
+ return send_file(STRUCTURED_BEAT_TEMPLATE,mimetype='text/plain; charset=utf-8',as_attachment=True,
+                  download_name='structured-beat-script-starter.txt')
 
 @app.get('/api/projects/<pid>/block-map-template')
 def block_map_template(pid):

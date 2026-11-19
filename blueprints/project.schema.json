@@ -23,6 +23,13 @@
     "schema_version": {
       "const": 1
     },
+    "script_workflow": {
+      "enum": [
+        "standard",
+        "structured_beat"
+      ],
+      "description": "Optional starting workflow. The uploaded source script remains authoritative."
+    },
     "title": {
       "type": "string",
       "minLength": 1
